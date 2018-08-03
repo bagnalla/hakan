@@ -1,0 +1,51 @@
+val nand : Bool → Bool → Bool
+let nand = λx. λy. ¬ (x ∧ y)
+
+val xor : Bool → Bool → Bool
+let xor = λx. λy. if x then ¬ y else y
+
+val xnor : Bool → Bool → Bool
+let xnor = λx. λy. ¬ (xor x y)
+
+val succ : ℤ → ℤ
+let succ = λx. x + 1
+
+val pred : ℤ → ℤ
+let pred = λx. x - 1
+
+val proj1 : a × b → a
+let proj1 = λp. p₁
+
+val proj2 : a × b → b
+let proj2 = λp. p₂
+
+# Force evaluation of the argument and return unit.
+val seq : a → Unit
+letrec seq = λ_. tt
+
+# Function composition.
+val compose : (a → b) → (b → c) → a → c
+let compose = λf. λg. λx. g (f x)
+
+# Function tupling.
+val tuple : (a → b) → (a → c) → a → b × c
+let tuple = λf. λg. λx. (f x, g x)
+
+# Function cotupling.
+val cotuple : (a → c) → (b → c) → a + b → c
+let cotuple = λf. λg. λs.
+  case s of
+  | inl x → f x
+  | inr y → g y
+
+# Exponentiation
+val pow : ℤ → ℤ → ℤ
+letrec pow = λn. λm.
+  if m ≤ 0 then 1 else
+  n * pow n (m - 1)
+
+# Factorial
+val fact : ℤ → ℤ
+letrec fact = λn.
+  if n ≤ 0 then 1 else
+  n * fact (n - 1)
