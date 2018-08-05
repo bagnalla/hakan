@@ -44,6 +44,7 @@ tokens :-
   then                          { lex' TokenThen }
   else                          { lex' TokenElse }
   eval                          { lex' TokenEval }
+  check                         { lex' TokenCheck }
 --  fst                           { lex' TokenFst }
 --  snd                           { lex' TokenSnd }
   π₁                            { lex' TokenPi1 }
@@ -143,6 +144,7 @@ data TokenClass =
   | TokenThen
   | TokenElse
   | TokenEval
+  | TokenCheck
   | TokenPlus
   | TokenMinus
   | TokenMult
@@ -213,7 +215,8 @@ unLex TokenIf              = "if"
 unLex TokenThen            = "then"
 unLex TokenElse            = "else"
 unLex TokenEval            = "eval"
-unLex TokenPlus            = "eval"
+unLex TokenCheck           = "check"
+unLex TokenPlus            = "plus"
 unLex TokenMinus           = "minus"
 unLex TokenMult            = "mult"
 unLex TokenDiv             = "div"

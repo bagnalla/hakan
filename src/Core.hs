@@ -17,11 +17,14 @@ module Core (
   ) where
 
 import Control.Monad.State
+import Data.List (nub)
 import qualified Data.Traversable as T
+import System.IO.Unsafe
 
 import Ast
 import Gensym (nextSym)
 import Symtab (Id(..), Symtab(..), map)
+
 
 ----------------
 -- | Unification
@@ -61,6 +64,36 @@ unify ((s, t) : xs) =
     -- Failed to unify s and t
     Left (s, t)
 
+-- -- Rigid type variables refuse to change.
+-- unify ((s, t) : xs) =
+--   if s == t then
+--     unify xs
+--   else if isTyVar s && (not $ isRigid s) &&
+--           (not $ s `elem` freetyvars t) then
+--     seq (unsafePerformIO $ putStrLn $ show xs) $
+--     seq (unsafePerformIO $ putStrLn $ show (t, s)) $
+--     seq (unsafePerformIO $ putStrLn $ show $ tysubst t s xs) $ do
+--     rest <- unify $ tysubst t s xs
+--     return $ (t, s) : rest
+--   else if isTyVar t && (not $ isRigid t) &&
+--           (not $ t `elem` freetyvars s) then
+--     seq (unsafePerformIO $ putStrLn $ show xs) $
+--     seq (unsafePerformIO $ putStrLn $ show (s, t)) $
+--     seq (unsafePerformIO $ putStrLn $ show $ tysubst s t xs) $ do
+--       rest <- unify $ tysubst s t xs
+--       return $ (s, t) : rest
+--   else if isBiType s && isBiType t then
+--     let (s1, s2) = pairOfType s
+--         (t1, t2) = pairOfType t in
+--       unify $ (s1, t1) : (s2, t2) : xs
+--   else if isTyRef s && isTyRef t then
+--     let s' = tyOfRefType s
+--         t' = tyOfRefType t in
+--       unify $ (s', t') : xs
+--   else
+--     -- Failed to unify s and t
+--     Left (s, t)
+
 
 -------------------------------
 -- | Type variable substitution
@@ -72,7 +105,7 @@ class TySubstable a where
 instance TySubstable ConstrSet where
   tysubst x y [] = []
   tysubst x y ((s, t):cs) =
-    (if s == y then x else s, if t == y then x else t) : tysubst x y cs
+    (tysubst x y s, tysubst x y t) : tysubst x y cs
 
 -- Substitute one type for another in a type.
 instance TySubstable Type where
@@ -164,15 +197,16 @@ class FreeTyVars a where
 freeTyVarsAux :: [Id] -> Type -> [Type]
 freeTyVarsAux ids = typeRec $
                     \ty -> case ty of
-                      TyVar b x -> if x `elem` ids then [TyVar b x] else []
+                      TyVar b x -> if x `elem` ids then []
+                                   else [TyVar b x]
                       _ -> []
 
 instance FreeTyVars Type where
-  freetyvars = freeTyVarsAux []
+  freetyvars = nub . freeTyVarsAux []
 
 -- Forall quantified type variables of the type scheme are not free
 instance FreeTyVars TypeScheme where
-  freetyvars ts = freeTyVarsAux (ts_tyvars_of ts) (ts_ty_of ts)
+  freetyvars ts = nub $ freeTyVarsAux (ts_tyvars_of ts) (ts_ty_of ts)
 
 
 ---------------------------------------------------------------
@@ -220,7 +254,14 @@ instance GenTyVars (Term α) where
     tm1' <- gentyvars tm1
     tm2' <- gentyvars tm2
     return $ TmCase fi discrim' nm1 tm1' nm2 tm2'
-  gentyvars t = return t
+  gentyvars (TmLet fi x tm1 tm2) =
+    pure (TmLet fi x) <*> gentyvars tm1 <*> gentyvars tm2
+  gentyvars t@(TmVar _ _) = return t
+  gentyvars t@(TmUnit _) = return t
+  gentyvars t@(TmBool _ _) = return t
+  gentyvars t@(TmInt _ _) = return t
+  gentyvars t = error $ "gentyvars instance for Term: unimplemented case: "
+                ++ show t
 
 -- Generate fresh type variables for a single command
 instance GenTyVars (Command α) where

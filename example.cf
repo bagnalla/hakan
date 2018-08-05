@@ -42,21 +42,21 @@ let incn = μ (λg. λn.
 〚 counter ← !counter + 1 〛
 〚 counter ← !counter + 1 〛
 
-val f : (a → b) → ℤ
-let f = λ_. 0
+# val f : (a → b) → ℤ
+# let f = λ_. 0
 
-〚 f f 〛
+# 〚 f f 〛
 
-val g : a → a
-let g = λx. x
+# val g : a → a
+# let g = λx. x
 
 val triangle : ℤ → ℤ
 letrec triangle = λn. if n = 0 then 0 else n + triangle (n - 1)
 
 〚 dontimes (λ_. counter ← !counter + 1)
-            (let x = 5 in triangle (100 + x)) 〛
-   # seq (!counter);
-   # fact 10 〛
+            (let x = 5 in triangle (100 + x));
+   seq (!counter);
+   fact 10 〛
 
 # val f : ℤ → ℤ
 # let f = λx. x + 5
@@ -66,39 +66,23 @@ letrec triangle = λn. if n = 0 then 0 else n + triangle (n - 1)
 
 # val h : ℤ × ℤ → ℤ × ℤ
 # let h = ⟨f ∘ π₁, g ∘ π₂⟩
-# # let h = tuple (compose fst f) (compose snd g)
-# # let h = ⟨f, g⟩
 
 # val x : ℤ × ℤ
 # let x = (1, 2)
 
+# 〚 h x 〛
 
-# # 〚 (f ∘ π₁) x 〛
+# 〚 (λx. f (π₁ x)) x 〛
+# 〚 (f ∘ π₁) x 〛
+# 〚 let comp = (λf. λg. λx. g (f x)) in comp π₁ f x 〛
 # 〚 compose f π₁ 〛
 
-val f : ℤ → Bool
-let f = λx:Int. if x = 0 then ⊥ else ⊤
 
-val g : Bool → Unit
-let g = λ_:Bool. tt
-
-# let compose = λf. λg. λx. g (f x)
-
-# There is a bug in the typechecker. It lets the following program
+# There was a bug in the typechecker. It let the following program
 # through which leads to a runtime error.
+# val f : ℤ → Bool
+# let f = λx:Int. if x = 0 then ⊥ else ⊤
+# val g : Bool → Unit
+# let g = λx:Bool. tt
 # 〚 (λf. λg. λx. g (f x)) g f 0 〛
-〚 compose g f 0 〛
-
-# (((λf. λg. λx. g (f x)) g) f) 0   has type X
-
-# ((λf. λg. λx. g (f x)) g) f   should be Int -> X
-
-# (λf. λg. λx. g (f x)) g   should be (Int -> Bool) -> (Int -> X)
-
-# λg. λf. λx. f (g x))   should be (Bool -> Unit) -> ((Int -> Bool) -> (Int -> X))
-
-# λf. λx. f (g x))   should be (Int -> Bool) -> (Int -> X)
-
-# λx. f (g x))   should be Int -> X
-
-# f (g x))   should be Int -> X
+# 〚 let asdf = compose g f 0 in asdf 〛

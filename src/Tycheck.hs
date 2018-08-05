@@ -19,6 +19,7 @@ import Core (data_of_term, data_of_command, FreeTyVars(..), ConstrSet,
 import Gensym (nextSym, nextSym2, nextSym3)
 import Parser
 import Symtab (Symtab, Id(..), empty, add, get, exists)
+import Util
 
 
 ---------------------------------------------
@@ -59,7 +60,10 @@ tryUnify :: Show α => α -> ConstrSet -> (TypeSubst -> TycheckM a) ->
 tryUnify fi c f =
   case unify c of
     Left (s, t) -> unifyError s t fi
-    Right tsubst -> f tsubst
+    Right tsubst ->
+      -- seq (unsafePerformIO (putStrLn $ show tsubst))
+      -- f tsubst
+      f tsubst
 
 tycheckTerm :: Show α => Term α -> TycheckM (Term TyData, ConstrSet)
 tycheckTerm (TmVar fi x) = do
@@ -68,33 +72,61 @@ tycheckTerm (TmVar fi x) = do
   case tyscheme of
     Just tyscheme' -> do
       ty <- instantiate_tyscheme tyscheme'
-      return $ (TmVar (mkData ty) x, [])
+      debugPrint ("var nm: " ++ show x) $
+        debugPrint ("var tyscheme: " ++ show tyscheme') $
+        debugPrint ("var ty : " ++ show ty ++ "\n") $ do
+        return $ (TmVar (mkData ty) x, [])
     Nothing ->
       throwError $ "Type error: unbound identifier " ++ show x ++
       " at " ++ show fi
+
+-- tycheckTerm (TmAbs fi x ty tm) = do
+--   (tm', c) <- local (\(decls, ctx) ->
+--                        (decls, add x (mkTypeScheme [] ty) ctx)) $
+--               tycheckTerm tm
+--   let ty' = ty_of_term tm'
+--   tryUnify fi c $
+--     \tsubst ->
+--       return (tysubstAll tsubst $
+--                TmAbs (mkData $ TyArrow ty ty') x ty tm', c)
 
 tycheckTerm (TmAbs fi x ty tm) = do
   (tm', c) <- local (\(decls, ctx) ->
                        (decls, add x (mkTypeScheme [] ty) ctx)) $
               tycheckTerm tm
   let ty' = ty_of_term tm'
-  tryUnify fi c $
-    \tsubst ->
-      return (tysubstAll tsubst $
-               TmAbs (mkData $ TyArrow ty ty') x ty tm',
-              c)
-
+  debugPrint ("abs nm: " ++ show x) $
+    debugPrint ("abs tm: " ++ show tm') $
+    debugPrint ("abs ty: " ++ show ty) $
+    debugPrint ("abs tyscheme: " ++ show (mkTypeScheme [] ty)) $
+    debugPrint ("abs ty': " ++ show ty') $ do
+    y <- nextSym "?Y_"
+    let tyy = TyVar False (Id y)
+    let c' = c ++ [(tyy, TyArrow ty ty')]
+    debugPrint ("abs c: " ++ show c') $
+      tryUnify fi c' $
+      \tsubst ->
+        debugPrint ("abs tsubst: " ++ show tsubst ++ "\n") $
+        return (tysubstAll tsubst $
+                TmAbs (mkData tyy) x ty tm', c')
+  
 tycheckTerm (TmApp fi t1 t2) = do
   (t1', c1) <- tycheckTerm t1
   (t2', c2) <- tycheckTerm t2
   let ty1 = ty_of_term t1'
   let ty2 = ty_of_term t2'
-  x <- nextSym "?Y_"
-  let tyx = TyVar False (Id x)
-  let c = c1 ++ c2 ++ [(ty1, TyArrow ty2 tyx)]
-  tryUnify fi c $
-    \tsubst ->
-      return (tysubstAll tsubst $ TmApp (mkData tyx) t1' t2', c)
+  debugPrint ("app tm1: " ++ show t1') $
+    debugPrint ("app tm2: " ++ show t2') $
+    debugPrint ("app ty1: " ++ show ty1) $
+    debugPrint ("app ty2: " ++ show ty2) $ do
+    x <- nextSym "?Y_"
+    let tyx = TyVar False (Id x)
+    let c = c1 ++ c2 ++ [(ty1, TyArrow ty2 tyx)]
+    debugPrint ("app c: " ++ show c) $
+      tryUnify fi c $
+      \tsubst ->
+        debugPrint ("app tsubst: " ++ show tsubst ++ "\n") $
+        return (tysubstAll tsubst $ TmApp (mkData tyx) t1' t2', c)
 
 tycheckTerm (TmBool fi b) =
   return (TmBool (mkData TyBool) b, [])
@@ -231,19 +263,37 @@ tycheckTerm (TmCase fi discrim nm1 t1 nm2 t2) = do
       return (tysubstAll tsubst $
               TmCase (mkData tyx) discrim' nm1 t1' nm2 t2', c)
 
+-- tycheckTerm (TmLet fi x tm1 tm2) = do
+--   (tm1', c1) <- tycheckTerm tm1
+--   let ty1 = ty_of_term tm1'
+--   seq (unsafePerformIO $ putStrLn $ show ty1) $ do
+--     tyscheme <- if isValue tm1' then generalize_ty ty1
+--                 else return $ mkTypeScheme [] ty1
+--     -- seq (unsafePerformIO $ putStrLn $ show tyscheme) $ do
+--     (tm2', c2) <- local (\(decls, ctx) ->
+--                            (decls, add x tyscheme ctx)) $
+--                   tycheckTerm tm2
+--     let c = c1 ++ c2
+--     tryUnify fi c $
+--       \tsubst ->
+--         return (tysubstAll tsubst $
+--                 TmLet (mkData $ ty_of_term tm2') x tm1' tm2', c)
+
 tycheckTerm (TmLet fi x tm1 tm2) = do
   (tm1', c1) <- tycheckTerm tm1
   let ty1 = ty_of_term tm1'
   tyscheme <- if isValue tm1' then generalize_ty ty1
               else return $ mkTypeScheme [] ty1
-  (tm2', c2) <- local (\(decls, ctx) ->
-                         (decls, add x tyscheme ctx)) $
-                tycheckTerm tm2
-  let c = c1 ++ c2
-  tryUnify fi c $
-    \tsubst ->
-      return (tysubstAll tsubst $
-              TmLet (mkData $ ty_of_term tm2') x tm1' tm2', c)
+  debugPrint ("let ty: " ++ show ty1) $
+    debugPrint ("let tyscheme: " ++ show tyscheme ++ "\n") $ do
+    (tm2', c2) <- local (\(decls, ctx) ->
+                           (decls, add x tyscheme ctx)) $
+                  tycheckTerm tm2
+    let c = c1 ++ c2
+    tryUnify fi c $
+      \tsubst ->
+        return (tysubstAll tsubst $
+                TmLet (mkData $ ty_of_term tm2') x tm1' tm2', c)
 
 tycheckCommand :: Show α => Command α -> TycheckM (Command TyData)
 tycheckCommand (CDecl fi x ty) = return $ CDecl (mkData TyUnit) x ty
@@ -254,6 +304,7 @@ tycheckCommand (CLet fi x t) = do
 
 tycheckCommand (CEval fi t) = do
   (t', _) <- tycheckTerm t
+  -- seq (unsafePerformIO $ putStrLn $ show $ ty_of_term t') $
   return $ CEval (mkData (ty_of_term t')) t'
 
 tycheckCommands :: Show α => [Command α] -> TycheckM [Command TyData]
@@ -262,10 +313,15 @@ tycheckCommands (com:coms) = do
   com' <- tycheckCommand com
   case com' of
     CDecl _ x ty -> do
+      let fvs = freetyvars ty
       tyscheme <- generalize_ty ty
-      coms' <- local (\(decls, ctx) -> (add x tyscheme decls, ctx)) $
-               tycheckCommands coms
-      return $ com' : coms'
+      tyscheme' <- instantiate_tyscheme tyscheme
+      debugPrint ("CDecl ty: " ++ show ty) $
+        debugPrint ("CDecl tyscheme: " ++ show tyscheme) $
+        debugPrint ("CDecl fvs: " ++ show fvs) $ do
+        coms' <- local (\(decls, ctx) -> (add x tyscheme decls, ctx)) $
+                 tycheckCommands coms
+        return $ com' : coms'
     CLet fi x tm -> do
       (decls, ctx) <- ask
       let ty = ty_of_term tm
@@ -314,12 +370,14 @@ generalize_ty ty = do
         (filter (\(TyVar _ x) -> not $ x `exists` ctx) fvs)
   return $ mkTypeScheme generalizable ty
 
--- Assumes type variables are not rigid.
+-- Passing False for the type variables rigidness doesn't matter since
+-- the Eq instance for types ignores it.
 instantiate_tyscheme :: TypeScheme -> TycheckM Type
 instantiate_tyscheme tyscheme = do
   tyscheme' <- foldM (\acc x -> do
                          y <- nextSym "?Y_"
-                         return $ tysubst (TyVar False x) (TyVar False (Id y)) acc)
+                         return $ tysubst (TyVar False (Id y))
+                           (TyVar False x) acc)
          tyscheme (ts_tyvars_of tyscheme)
   return (ts_ty_of tyscheme')
 

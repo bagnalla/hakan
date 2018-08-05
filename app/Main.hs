@@ -4,7 +4,7 @@ import Control.Monad
 import System.Environment (getArgs)
 -- import System.IO (hGetContents)
 import Ast
-import Core (genTypeVars, unify)
+import Core (genTypeVars, unify, FreeTyVars(..))
 import Interp (interpProg)
 import Parser (parseProg)
 import Preprocessor (importLines, substImports)
@@ -33,6 +33,9 @@ main = do
 
   let ast = parseAndTycheck src'
   putStrLn $ show ast
+
+  -- let fvs = freetyvars $ TyVar False (Id "a")
+  -- putStrLn $ show fvs
 
   -- putStrLn $ show $ unify [(TyVar $ Id "a", TyPair TyUnit TyUnit)]
   

@@ -33,6 +33,7 @@ import Core (data_of_term)
   then         { Token $$ TokenThen }
   else         { Token $$ TokenElse }
   eval         { Token $$ TokenEval }
+  check        { Token $$ TokenCheck }
   id           { Token _ (TokenId _) }
 --  fst          { Token $$ TokenFst }
 --  snd          { Token $$ TokenSnd }

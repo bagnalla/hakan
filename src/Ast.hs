@@ -16,14 +16,12 @@
 -- representation during compilation.
 
 -- TODO:
--- 1) generalize products to n-ary, replacing unit with the nullary
--- product.
--- 2) add algebraic datatypes (probably using functor fixpoint stuff)
+-- 1) add algebraic datatypes (probably using functor fixpoint stuff)
 -- and remove sums.
--- 3) make a somewhat proper module system, probably like the modula
+-- 2) make a somewhat proper module system, probably like the modula
 -- based one described in the ZINC report.
--- 4) char, string, and float types.
--- 5) I/O.
+-- 3) char, string, and float types.
+-- 4) I/O.
 -- 5) typeclasses. We may way to hold off on floats until we can set
 -- up a "numeric" typeclass.. but maybe not since this is probably a
 -- ways off.
@@ -38,6 +36,7 @@ module Ast (
 import Data.List (intercalate)
 import Data.Semigroup
 import Symtab (Id(..))
+import Util
 
 
 ----------
@@ -52,7 +51,18 @@ data Type =
   | TyPair Type Type
   | TySum Type Type
   | TyRef Type
-  deriving (Eq)
+  -- deriving (Eq)
+
+instance Eq Type where
+  TyUnit == TyUnit = True
+  TyBool == TyBool = True
+  TyInt == TyInt = True
+  TyArrow s1 t1 == TyArrow s2 t2 = s1 == s2 && t1 == t2
+  TyPair s1 t1 == TyPair s2 t2 = s1 == s2 && t1 == t2
+  TySum s1 t1 == TySum s2 t2 = s1 == s2 && t1 == t2
+  TyRef t1 == TyRef t2 = t1 == t2
+  TyVar _ x == TyVar _ y = x == y
+  t1 == t2 = False
 
 -- A sort of recursion scheme for types. Used for example in
 -- freeTyVarsAux in Core.hs.
@@ -83,6 +93,7 @@ data TypeScheme =
 
 mkTypeScheme :: [Id] -> Type -> TypeScheme
 mkTypeScheme ids ty =
+  -- debugPrint (show ty) $
   TypeScheme { ts_tyvars_of = ids,
                ts_ty_of     = ty }
 
@@ -134,7 +145,6 @@ data Term α =
   | TmInr α (Term α) Type
   | TmCase α (Term α) Id (Term α) Id (Term α)
   | TmLet α Id (Term α) (Term α)
-  -- | TmProj α (Term α) (Term α) -- nth projection of a tuple
   deriving (Eq, Functor)
 
 
@@ -172,6 +182,7 @@ data Command α =
   CDecl α Id Type
   | CLet α Id (Term α)
   | CEval α (Term α)
+  | CCheck α (Term α)
   deriving Functor
 
 
@@ -199,7 +210,7 @@ instance Show Type where
   show TyBool = "Bool"
   show TyInt  = "Int"
   show (TyArrow t1 t2) = "(" ++ show t1 ++ "->" ++ show t2 ++ ")"
-  show (TyVar _ (Id s)) = s
+  show (TyVar _ (Id s)) = "(TyVar " ++ s ++ ")"
   show (TyPair t1 t2) = "(" ++ show t1 ++ " * " ++ show t2 ++ ")"
   show (TySum t1 t2) = "(" ++ show t1 ++ " + " ++ show t2 ++ ")"
   show (TyRef ty) = "(TyRef " ++ show ty ++ ")"
@@ -234,6 +245,7 @@ instance Show α => Show (Command α) where
   show (CDecl _ s t) = "(CDecl " ++ show s ++ " " ++ show t ++ ")"
   show (CLet _ s t)  = "(CLet " ++ show s ++ " " ++ show t ++ ")"
   show (CEval _ t)   = "(CEval " ++ show t ++ ")"
+  show (CCheck _ t)  = "(CCheck " ++ show t ++ ")"
 
 instance Show α => Show (Prog α) where
   show (Prog { prog_of = p }) =
