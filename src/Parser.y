@@ -171,11 +171,11 @@ Term :
   | Term ":=" Term { Ast.TmBinop $2 Ast.BUpdate $1 $3 }
   | Term '∘' Term
     { Ast.TmApp $2 (Ast.TmApp $2  (Ast.TmVar $2 (Id "compose")) $3) $1 }
-  | '(' Term ',' Term ')' { Ast.TmPair $1 $2 $4 }
-  | '[' Term ',' Term ']'
-    { Ast.TmApp $1 (Ast.TmApp $1 (Ast.TmVar $1 (Id "cotuple")) $2) $4 }
-  | '⟨' Term ',' Term '⟩'
-    { Ast.TmApp $1 (Ast.TmApp $1 (Ast.TmVar $1 (Id "tuple")) $2) $4 }
+--  | '(' Term ',' Term ')' { Ast.TmPair $1 $2 $4 }
+--  | '[' Term ',' Term ']'
+--    { Ast.TmApp $1 (Ast.TmApp $1 (Ast.TmVar $1 (Id "cotuple")) $2) $4 }
+--  | '⟨' Term ',' Term '⟩'
+--    { Ast.TmApp $1 (Ast.TmApp $1 (Ast.TmVar $1 (Id "tuple")) $2) $4 }
   | case Term of '|' inl id arrow Term '|' inr id arrow Term
     { case ($6, $11) of
 	(Token _ (TokenId nm1), Token _ (TokenId nm2)) ->
@@ -196,8 +196,7 @@ AppTerm :
 
 -- Atomic terms
 ATerm :
-  '(' Term ')' { $2 }
-  | tt { Ast.TmUnit $1 }
+  tt { Ast.TmUnit $1 }
   | true { Ast.TmBool $1 True }
   | false { Ast.TmBool $1 False }
   | intVal { case $1 of
@@ -208,6 +207,12 @@ ATerm :
         Ast.TmVar fi x }
   | "π₁" { Ast.TmVar $1 (Id "proj1") }
   | "π₂" { Ast.TmVar $1 (Id "proj2") }
+  | '(' Term ')' { $2 }
+  | '(' Term ',' Term ')' { Ast.TmPair $1 $2 $4 }
+  | '[' Term ',' Term ']'
+    { Ast.TmApp $1 (Ast.TmApp $1 (Ast.TmVar $1 (Id "cotuple")) $2) $4 }
+  | '⟨' Term ',' Term '⟩'
+    { Ast.TmApp $1 (Ast.TmApp $1 (Ast.TmVar $1 (Id "tuple")) $2) $4 }
 
 Command :
   val id TyDeclBinder {

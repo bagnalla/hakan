@@ -16,10 +16,20 @@ module Symtab (
 
 -- Use Haskell's map data structure
 import qualified Data.Map.Strict as Map
+import Test.QuickCheck
+
 
 -- an Id is just a String
-newtype Id = Id String
+-- newtype Id = Id String
+newtype Id = Id { unId :: String }
   deriving (Eq, Ord)
+
+-- TODO: use a custom generator here for the id strings, so they are
+-- just "a", "b", and "c" or something like that. Otherwise two id
+-- strings are almost never the same so it's useless for testing
+-- things like substitution.
+instance Arbitrary Id where
+  arbitrary = Id <$> arbitrary
 
 -- A Symtab maps Ids to values of some type
 type Symtab a = Map.Map Id a

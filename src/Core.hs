@@ -17,9 +17,10 @@ module Core (
   ) where
 
 import Control.Monad.State
+import Data.Bifunctor
 import Data.List (nub)
 import qualified Data.Traversable as T
-import System.IO.Unsafe
+-- import System.IO.Unsafe
 
 import Ast
 import Gensym (nextSym)
@@ -101,11 +102,17 @@ unify ((s, t) : xs) =
 class TySubstable a where
   tysubst :: Type -> Type -> a -> a
 
--- Substitute one type for another (x for y) in a constraint set.
-instance TySubstable ConstrSet where
-  tysubst x y [] = []
-  tysubst x y ((s, t):cs) =
-    (tysubst x y s, tysubst x y t) : tysubst x y cs
+-- Lift type substitution to lists.
+instance TySubstable a => TySubstable [a] where
+  tysubst _ _ [] = []
+  tysubst s t (x:xs) = tysubst s t x : tysubst s t xs
+
+-- Lift type substitution to any bifunctor (e.g., pair). It would be
+-- nice to use a similar instance for functors so we don't need the
+-- list instance but then we have overlapping instances for Term.
+instance (Bifunctor f, TySubstable a, TySubstable b) =>
+         TySubstable (f a b) where
+  tysubst s t = bimap (tysubst s t) (tysubst s t)
 
 -- Substitute one type for another in a type.
 instance TySubstable Type where

@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE KindSignatures #-}
 
 -- | This module defines the internal language syntax.
@@ -35,6 +36,11 @@ module Ast (
 
 import Data.List (intercalate)
 import Data.Semigroup
+import GHC.Generics (Generic)
+import Generic.Random.Generic
+
+import Test.QuickCheck
+
 import Symtab (Id(..))
 import Util
 
@@ -51,18 +57,7 @@ data Type =
   | TyPair Type Type
   | TySum Type Type
   | TyRef Type
-  -- deriving (Eq)
-
-instance Eq Type where
-  TyUnit == TyUnit = True
-  TyBool == TyBool = True
-  TyInt == TyInt = True
-  TyArrow s1 t1 == TyArrow s2 t2 = s1 == s2 && t1 == t2
-  TyPair s1 t1 == TyPair s2 t2 = s1 == s2 && t1 == t2
-  TySum s1 t1 == TySum s2 t2 = s1 == s2 && t1 == t2
-  TyRef t1 == TyRef t2 = t1 == t2
-  TyVar _ x == TyVar _ y = x == y
-  t1 == t2 = False
+  deriving Generic
 
 -- A sort of recursion scheme for types. Used for example in
 -- freeTyVarsAux in Core.hs.
@@ -93,7 +88,6 @@ data TypeScheme =
 
 mkTypeScheme :: [Id] -> Type -> TypeScheme
 mkTypeScheme ids ty =
-  -- debugPrint (show ty) $
   TypeScheme { ts_tyvars_of = ids,
                ts_ty_of     = ty }
 
@@ -105,7 +99,7 @@ data Unop =
   | USnd
   | URef
   | UDeref
-  deriving (Eq, Show)
+  deriving (Eq, Generic, Show)
 
 data Binop =
   BPlus
@@ -121,7 +115,7 @@ data Binop =
   | BAnd
   | BOr
   | BUpdate
-  deriving (Eq, Show)
+  deriving (Eq, Generic, Show)
 
 
 ----------
@@ -145,7 +139,7 @@ data Term α =
   | TmInr α (Term α) Type
   | TmCase α (Term α) Id (Term α) Id (Term α)
   | TmLet α Id (Term α) (Term α)
-  deriving (Eq, Functor)
+  deriving (Eq, Functor, Generic)
 
 
 -- Map a function over terms (like fmap if the subterms were a
@@ -183,7 +177,7 @@ data Command α =
   | CLet α Id (Term α)
   | CEval α (Term α)
   | CCheck α (Term α)
-  deriving Functor
+  deriving (Functor, Generic)
 
 
 ------------
@@ -192,7 +186,7 @@ data Command α =
 data Prog α =
   Prog { pdata_of :: α,
          prog_of  :: [Command α] }
-  deriving Functor
+  deriving (Functor, Generic)
 
 
 -------------------
@@ -214,6 +208,25 @@ instance Show Type where
   show (TyPair t1 t2) = "(" ++ show t1 ++ " * " ++ show t2 ++ ")"
   show (TySum t1 t2) = "(" ++ show t1 ++ " + " ++ show t2 ++ ")"
   show (TyRef ty) = "(TyRef " ++ show ty ++ ")"
+
+instance Eq Type where
+  TyUnit == TyUnit = True
+  TyBool == TyBool = True
+  TyInt == TyInt = True
+  TyArrow s1 t1 == TyArrow s2 t2 = s1 == s2 && t1 == t2
+  TyPair s1 t1 == TyPair s2 t2 = s1 == s2 && t1 == t2
+  TySum s1 t1 == TySum s2 t2 = s1 == s2 && t1 == t2
+  TyRef t1 == TyRef t2 = t1 == t2
+  TyVar _ x == TyVar _ y = x == y
+  t1 == t2 = False
+
+instance Arbitrary Type where
+  arbitrary = genericArbitrary' Z uniform
+  shrink (TyArrow s t) = [s, t]
+  shrink (TyPair s t) = [s, t]
+  shrink (TySum s t) = [s, t]
+  shrink (TyRef s) = [s]
+  shrink _ = []
 
 
 --------------------------------

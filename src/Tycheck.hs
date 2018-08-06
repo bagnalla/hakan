@@ -61,8 +61,6 @@ tryUnify fi c f =
   case unify c of
     Left (s, t) -> unifyError s t fi
     Right tsubst ->
-      -- seq (unsafePerformIO (putStrLn $ show tsubst))
-      -- f tsubst
       f tsubst
 
 tycheckTerm :: Show α => Term α -> TycheckM (Term TyData, ConstrSet)
@@ -79,16 +77,6 @@ tycheckTerm (TmVar fi x) = do
     Nothing ->
       throwError $ "Type error: unbound identifier " ++ show x ++
       " at " ++ show fi
-
--- tycheckTerm (TmAbs fi x ty tm) = do
---   (tm', c) <- local (\(decls, ctx) ->
---                        (decls, add x (mkTypeScheme [] ty) ctx)) $
---               tycheckTerm tm
---   let ty' = ty_of_term tm'
---   tryUnify fi c $
---     \tsubst ->
---       return (tysubstAll tsubst $
---                TmAbs (mkData $ TyArrow ty ty') x ty tm', c)
 
 tycheckTerm (TmAbs fi x ty tm) = do
   (tm', c) <- local (\(decls, ctx) ->
@@ -263,22 +251,6 @@ tycheckTerm (TmCase fi discrim nm1 t1 nm2 t2) = do
       return (tysubstAll tsubst $
               TmCase (mkData tyx) discrim' nm1 t1' nm2 t2', c)
 
--- tycheckTerm (TmLet fi x tm1 tm2) = do
---   (tm1', c1) <- tycheckTerm tm1
---   let ty1 = ty_of_term tm1'
---   seq (unsafePerformIO $ putStrLn $ show ty1) $ do
---     tyscheme <- if isValue tm1' then generalize_ty ty1
---                 else return $ mkTypeScheme [] ty1
---     -- seq (unsafePerformIO $ putStrLn $ show tyscheme) $ do
---     (tm2', c2) <- local (\(decls, ctx) ->
---                            (decls, add x tyscheme ctx)) $
---                   tycheckTerm tm2
---     let c = c1 ++ c2
---     tryUnify fi c $
---       \tsubst ->
---         return (tysubstAll tsubst $
---                 TmLet (mkData $ ty_of_term tm2') x tm1' tm2', c)
-
 tycheckTerm (TmLet fi x tm1 tm2) = do
   (tm1', c1) <- tycheckTerm tm1
   let ty1 = ty_of_term tm1'
@@ -304,7 +276,6 @@ tycheckCommand (CLet fi x t) = do
 
 tycheckCommand (CEval fi t) = do
   (t', _) <- tycheckTerm t
-  -- seq (unsafePerformIO $ putStrLn $ show $ ty_of_term t') $
   return $ CEval (mkData (ty_of_term t')) t'
 
 tycheckCommands :: Show α => [Command α] -> TycheckM [Command TyData]
