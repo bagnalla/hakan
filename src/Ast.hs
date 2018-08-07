@@ -76,6 +76,10 @@ typeRec2 f ty@(TySum s t)   = f $ TySum (typeRec2 f s) (typeRec2 f t)
 typeRec2 f ty@(TyRef s)     = f $ TyRef $ typeRec2 f s
 typeRec2 f ty               = f ty
 
+-- flattenType :: Type -> [Type]
+-- flattenType = typeRec $ \ty ->
+--                           case ty of
+
 
 -- Type schemes. A type together with a list of its free type
 -- variables. The typechecker computes type schemes for every term,
@@ -309,3 +313,10 @@ binopType BGe     = TyBool
 binopType BAnd    = TyBool
 binopType BOr     = TyBool
 binopType BUpdate = TyUnit
+
+-- isSimpleType :: Type -> Bool
+-- isSimpleType TyUnit = True
+-- isSimpleType TyBool = True
+-- isSimpleType TyInt = True
+-- isSimpleType (TyVar _ _) = True
+-- isSimpleType _ = False

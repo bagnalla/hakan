@@ -20,16 +20,16 @@ import Test.QuickCheck
 
 
 -- an Id is just a String
--- newtype Id = Id String
 newtype Id = Id { unId :: String }
   deriving (Eq, Ord)
 
--- TODO: use a custom generator here for the id strings, so they are
--- just "a", "b", and "c" or something like that. Otherwise two id
--- strings are almost never the same so it's useless for testing
--- things like substitution.
+intToId :: Int -> Id
+intToId 0 = Id "a"
+intToId 1 = Id "b"
+intToId _ = Id "c"
+
 instance Arbitrary Id where
-  arbitrary = Id <$> arbitrary
+  arbitrary = intToId <$> choose (0, 2)
 
 -- A Symtab maps Ids to values of some type
 type Symtab a = Map.Map Id a

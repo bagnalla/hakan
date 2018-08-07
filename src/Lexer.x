@@ -43,7 +43,7 @@ tokens :-
   if                            { lex' TokenIf }
   then                          { lex' TokenThen }
   else                          { lex' TokenElse }
-  eval                          { lex' TokenEval }
+  evaluate                      { lex' TokenEval }
   check                         { lex' TokenCheck }
 --  fst                           { lex' TokenFst }
 --  snd                           { lex' TokenSnd }
@@ -214,7 +214,7 @@ unLex TokenFix             = "fix"
 unLex TokenIf              = "if"
 unLex TokenThen            = "then"
 unLex TokenElse            = "else"
-unLex TokenEval            = "eval"
+unLex TokenEval            = "evaluate"
 unLex TokenCheck           = "check"
 unLex TokenPlus            = "plus"
 unLex TokenMinus           = "minus"

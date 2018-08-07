@@ -19,6 +19,9 @@ let proj1 = λp. p₁
 val proj2 : a × b → b
 let proj2 = λp. p₂
 
+val double : a → a × a
+let double = λx. (x, x)
+
 # Force evaluation of the argument and return unit.
 val seq : a → Unit
 letrec seq = λ_. tt
@@ -37,6 +40,15 @@ let cotuple = λf. λg. λs.
   case s of
   | inl x → f x
   | inr y → g y
+
+val curry : ((a × b) → c) → a → b → c
+let curry = λf. λx. λy. f (x, y)
+
+val uncurry : (a → b → c) → (a × b) → c
+let uncurry = λf. λp. f p₁ p₂
+
+val eval : (a → b) → a → b
+let eval = λf. λx. f x
 
 # Exponentiation
 val pow : ℤ → ℤ → ℤ

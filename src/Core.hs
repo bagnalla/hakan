@@ -14,6 +14,7 @@ module Core (
   unify,
   tysubstAll,
   idOfType,
+  isTyVar
   ) where
 
 import Control.Monad.State
@@ -104,8 +105,7 @@ class TySubstable a where
 
 -- Lift type substitution to lists.
 instance TySubstable a => TySubstable [a] where
-  tysubst _ _ [] = []
-  tysubst s t (x:xs) = tysubst s t x : tysubst s t xs
+  tysubst s t = fmap $ tysubst s t
 
 -- Lift type substitution to any bifunctor (e.g., pair). It would be
 -- nice to use a similar instance for functors so we don't need the
@@ -116,14 +116,15 @@ instance (Bifunctor f, TySubstable a, TySubstable b) =>
 
 -- Substitute one type for another in a type.
 instance TySubstable Type where
-  tysubst s t (TyArrow ty1 ty2) =
-    TyArrow (tysubst s t ty1) (tysubst s t ty2)
-  tysubst s t (TyPair ty1 ty2) =
-    TyPair (tysubst s t ty1) (tysubst s t ty2)
-  tysubst s t (TySum ty1 ty2) =
-    TySum (tysubst s t ty1) (tysubst s t ty2)
-  tysubst s t (TyRef ty) = TyRef (tysubst s t ty)
-  tysubst s t ty = if ty == t then s else ty
+  -- tysubst s t (TyArrow ty1 ty2) =
+  --   TyArrow (tysubst s t ty1) (tysubst s t ty2)
+  -- tysubst s t (TyPair ty1 ty2) =
+  --   TyPair (tysubst s t ty1) (tysubst s t ty2)
+  -- tysubst s t (TySum ty1 ty2) =
+  --   TySum (tysubst s t ty1) (tysubst s t ty2)
+  -- tysubst s t (TyRef ty) = TyRef (tysubst s t ty)
+  -- tysubst s t ty = if ty == t then s else ty
+  tysubst s t = typeRec2 $ \ty -> if ty == t then s else ty
 
 -- Substitute one type for another in a type scheme.
 instance TySubstable TypeScheme where
@@ -132,8 +133,9 @@ instance TySubstable TypeScheme where
       TyVar b x -> 
         if x `elem` ts_tyvars_of ts || b then
           -- TODO: why isn't this just ts
-          TypeScheme { ts_tyvars_of = ts_tyvars_of ts,
-                       ts_ty_of     = ts_ty_of ts }
+          -- TypeScheme { ts_tyvars_of = ts_tyvars_of ts,
+          --              ts_ty_of     = ts_ty_of ts }
+          ts
         else
           ts { ts_ty_of = tysubst s t (ts_ty_of ts) }
       _ -> ts { ts_ty_of = tysubst s t (ts_ty_of ts) }

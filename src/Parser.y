@@ -32,7 +32,7 @@ import Core (data_of_term)
   if           { Token $$ TokenIf }
   then         { Token $$ TokenThen }
   else         { Token $$ TokenElse }
-  eval         { Token $$ TokenEval }
+  evaluate     { Token $$ TokenEval }
   check        { Token $$ TokenCheck }
   id           { Token _ (TokenId _) }
 --  fst          { Token $$ TokenFst }
@@ -100,6 +100,7 @@ import Core (data_of_term)
 %left APP
 %nonassoc UNOP
 %nonassoc '-'
+--%nonassoc '₁' '₂'
 %nonassoc '(' ')'
 %%
 
@@ -189,8 +190,6 @@ AppTerm :
   ATerm { $1 }
   | AppTerm ATerm { Ast.TmApp (data_of_term $1) $1 $2 }
   | fix ATerm { Ast.TmUnop $1 Ast.UFix $2 }
-  | ATerm '₁' { Ast.TmUnop $2 Ast.UFst $1 }
-  | ATerm '₂' { Ast.TmUnop $2 Ast.USnd $1 }
   | inl ATerm TyBinder { Ast.TmInl $1 $2 $3 }
   | inr ATerm TyBinder { Ast.TmInr $1 $2 $3 }
 
@@ -213,6 +212,8 @@ ATerm :
     { Ast.TmApp $1 (Ast.TmApp $1 (Ast.TmVar $1 (Id "cotuple")) $2) $4 }
   | '⟨' Term ',' Term '⟩'
     { Ast.TmApp $1 (Ast.TmApp $1 (Ast.TmVar $1 (Id "tuple")) $2) $4 }
+  | ATerm '₁' { Ast.TmUnop $2 Ast.UFst $1 }
+  | ATerm '₂' { Ast.TmUnop $2 Ast.USnd $1 }
 
 Command :
   val id TyDeclBinder {
@@ -228,7 +229,7 @@ Command :
         Token fi (TokenId x) ->
 	  Ast.CLet fi x (Ast.TmUnop fi Ast.UFix
 			 (Ast.TmAbs fi x (Ast.TyVar False (Id "")) $3)) }
-  | eval Term { Ast.CEval $1 $2 }
+  | evaluate Term { Ast.CEval $1 $2 }
   | '〚' Term '〛' { Ast.CEval $1 $2 }
 
 TyBinder :
