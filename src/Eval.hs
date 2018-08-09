@@ -194,6 +194,9 @@ eval (TmLet _ x tm1 tm2) = do
   local (Env . add x v1 . unEnv) $ eval tm2
 
 
+-- Extend an environment with a new binding. If the identifier is "_",
+-- this is a noop. This prevents unnecessary binding of unused
+-- variables.
 extendEnv :: Id -> Value -> Env -> Env
 extendEnv x v =
   case x of

@@ -82,6 +82,9 @@ import Core (data_of_term)
   '⊗'          { Token $$ TokenTimes }
   '₁'          { Token $$ TokenSmall1 }
   '₂'          { Token $$ TokenSmall2 }
+  '∥'          { Token $$ TokenDoubleBar }
+  '▵'          { Token $$ TokenTriangle }
+  '▿'          { Token $$ TokenTriangleDown }
   -- eof          { Token $$ TokenEOF }
 
 %nonassoc ':'
@@ -96,6 +99,7 @@ import Core (data_of_term)
 %left '+' '-'
 %left '*' '/' '×' '⊗'
 %left '∘'
+%left '▵' '▿'
 %nonassoc fix true false intVal id
 %left APP
 %nonassoc UNOP
@@ -172,11 +176,6 @@ Term :
   | Term ":=" Term { Ast.TmBinop $2 Ast.BUpdate $1 $3 }
   | Term '∘' Term
     { Ast.TmApp $2 (Ast.TmApp $2  (Ast.TmVar $2 (Id "compose")) $3) $1 }
---  | '(' Term ',' Term ')' { Ast.TmPair $1 $2 $4 }
---  | '[' Term ',' Term ']'
---    { Ast.TmApp $1 (Ast.TmApp $1 (Ast.TmVar $1 (Id "cotuple")) $2) $4 }
---  | '⟨' Term ',' Term '⟩'
---    { Ast.TmApp $1 (Ast.TmApp $1 (Ast.TmVar $1 (Id "tuple")) $2) $4 }
   | case Term of '|' inl id arrow Term '|' inr id arrow Term
     { case ($6, $11) of
 	(Token _ (TokenId nm1), Token _ (TokenId nm2)) ->
@@ -185,6 +184,10 @@ Term :
   | let id '=' Term in Term { case $2 of
                                 Token fi (TokenId x) ->
                                   Ast.TmLet $1 x $4 $6 }
+  | Term '▿' Term
+    { Ast.TmApp $2 (Ast.TmApp $2 (Ast.TmVar $2 (Id "cotuple")) $1) $3 }
+  | Term '▵' Term
+    { Ast.TmApp $2 (Ast.TmApp $2 (Ast.TmVar $2 (Id "tuple")) $1) $3 }
 
 AppTerm :
   ATerm { $1 }

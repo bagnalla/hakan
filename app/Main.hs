@@ -34,12 +34,12 @@ main = do
   -- let ast = parseAndTycheck src'
   -- putStrLn $ show ast
 
-  let ty1 = TyVar False (Id "a")
-  let ty2 = TyVar False (Id "b")
-  let a = freetyvars (tysubst ty1 ty2 (TyPair ty1 ty2))
-  let b = tysubst ty1 ty2 (freetyvars (TyPair ty1 ty2))
-  putStrLn $ show a
-  putStrLn $ show b
+  -- let ty1 = TyVar False (Id "a")
+  -- let ty2 = TyVar False (Id "b")
+  -- let a = freetyvars (tysubst ty1 ty2 (TyPair ty1 ty2))
+  -- let b = tysubst ty1 ty2 (freetyvars (TyPair ty1 ty2))
+  -- putStrLn $ show a
+  -- putStrLn $ show b
 
   -- let fvs = freetyvars $ TyVar False (Id "a")
   -- putStrLn $ show fvs

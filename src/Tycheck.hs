@@ -368,8 +368,8 @@ unify_tyschemes fi tyscheme1 tyscheme2 = do
 -- Make all type variables in a typescheme non-rigid.
 loosen_tyscheme :: TypeScheme -> TypeScheme
 loosen_tyscheme tyscheme =
-  tyscheme { ts_ty_of = typeRec2 (\t ->
-                                    case t of
-                                      TyVar _ x -> TyVar False x
-                                      _ -> t) $
+  tyscheme { ts_ty_of = typeRec (\t ->
+                                   case t of
+                                     TyVar _ x -> TyVar False x
+                                     _ -> t) $
                         ts_ty_of tyscheme }

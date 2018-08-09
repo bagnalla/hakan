@@ -109,65 +109,28 @@ instance TySubstable a => TySubstable [a] where
 
 -- Lift type substitution to any bifunctor (e.g., pair). It would be
 -- nice to use a similar instance for functors so we don't need the
--- list instance but then we have overlapping instances for Term.
+-- list instance but then we have overlapping instances (incoherent
+-- instances?) for Term.
 instance (Bifunctor f, TySubstable a, TySubstable b) =>
          TySubstable (f a b) where
   tysubst s t = bimap (tysubst s t) (tysubst s t)
 
 -- Substitute one type for another in a type.
 instance TySubstable Type where
-  -- tysubst s t (TyArrow ty1 ty2) =
-  --   TyArrow (tysubst s t ty1) (tysubst s t ty2)
-  -- tysubst s t (TyPair ty1 ty2) =
-  --   TyPair (tysubst s t ty1) (tysubst s t ty2)
-  -- tysubst s t (TySum ty1 ty2) =
-  --   TySum (tysubst s t ty1) (tysubst s t ty2)
-  -- tysubst s t (TyRef ty) = TyRef (tysubst s t ty)
-  -- tysubst s t ty = if ty == t then s else ty
-  tysubst s t = typeRec2 $ \ty -> if ty == t then s else ty
+  tysubst s t = typeRec $ \ty -> if ty == t then s else ty
 
 -- Substitute one type for another in a type scheme.
 instance TySubstable TypeScheme where
   tysubst s t ts =
     case s of
       TyVar b x -> 
-        if x `elem` ts_tyvars_of ts || b then
-          -- TODO: why isn't this just ts
-          -- TypeScheme { ts_tyvars_of = ts_tyvars_of ts,
-          --              ts_ty_of     = ts_ty_of ts }
-          ts
-        else
-          ts { ts_ty_of = tysubst s t (ts_ty_of ts) }
+        if x `elem` ts_tyvars_of ts || b then ts
+        else ts { ts_ty_of = tysubst s t (ts_ty_of ts) }
       _ -> ts { ts_ty_of = tysubst s t (ts_ty_of ts) }
 
 -- Substitute one type for another in a lambda term.
 instance TySubstable α => TySubstable (Term α) where
-  tysubst s t (TmAbs fi x ty tm) =
-    TmAbs (tysubst s t fi) x (tysubst s t ty) (tysubst s t tm)
-  tysubst s t (TmApp fi tm1 tm2) =
-    TmApp (tysubst s t fi) (tysubst s t tm1) (tysubst s t tm2)
-  tysubst s t (TmIf fi tm1 tm2 tm3) =
-    TmIf (tysubst s t fi) (tysubst s t tm1) (tysubst s t tm2)
-    (tysubst s t tm3)
-  tysubst s t (TmVar fi x)  = TmVar (tysubst s t fi) x
-  tysubst s t (TmUnit fi)   = TmUnit (tysubst s t fi)
-  tysubst s t (TmBool fi b) = TmBool (tysubst s t fi) b
-  tysubst s t (TmInt fi i)  = TmInt (tysubst s t fi) i
-  tysubst s t (TmUnop fi u t1) =
-    TmUnop (tysubst s t fi) u (tysubst s t t1)
-  tysubst s t (TmBinop fi b t1 t2) =
-    TmBinop (tysubst s t fi) b (tysubst s t t1) (tysubst s t t2)
-  tysubst s t (TmPair fi t1 t2) =
-    TmPair (tysubst s t fi) (tysubst s t t1) (tysubst s t t2)
-  tysubst s t (TmInl fi tm ty) =
-    TmInl (tysubst s t fi) (tysubst s t tm) (tysubst s t ty)
-  tysubst s t (TmInr fi tm ty) =
-    TmInr (tysubst s t fi) (tysubst s t tm) (tysubst s t ty)
-  tysubst s t (TmCase fi discrim nm1 t1 nm2 t2) =
-    TmCase (tysubst s t fi) (tysubst s t discrim) nm1 (tysubst s t t1)
-    nm2 (tysubst s t t2)
-  tysubst s t (TmLet fi x tm1 tm2) =
-    TmLet (tysubst s t fi) x (tysubst s t tm1) (tysubst s t tm2)
+  tysubst s t = termTypeRec $ tysubst s t
 
 -- Substitute one type for another in a typing context.
 instance (TySubstable β) => TySubstable (Symtab β) where
@@ -196,15 +159,15 @@ tysubstAll tsubst x =
 --       aux bv (TmIf _ t1 t2 t3) = aux bv t1 ++ aux bv t2 ++ aux bv t3
 --       aux _ _                  = []
 
+
+-------------------------
+-- | Free type variables
+
 class FreeTyVars a where
   freetyvars :: a -> [Type]
 
-
-----------------------------------
--- | Free type variables of a type
-
 freeTyVarsAux :: [Id] -> Type -> [Type]
-freeTyVarsAux ids = typeRec $
+freeTyVarsAux ids = typeRec2 $
                     \ty -> case ty of
                       TyVar b x -> if x `elem` ids then []
                                    else [TyVar b x]
@@ -221,6 +184,8 @@ instance FreeTyVars TypeScheme where
 ---------------------------------------------------------------
 -- | Fill in omitted typed annotations with auto-generated type
 -- variables.  Uses prefix "?X_".
+
+-- TODO: monadic catamorphisms to generalize these operations?
 
 class GenTyVars a where
   gentyvars :: a -> State Int a
@@ -269,8 +234,6 @@ instance GenTyVars (Term α) where
   gentyvars t@(TmUnit _) = return t
   gentyvars t@(TmBool _ _) = return t
   gentyvars t@(TmInt _ _) = return t
-  gentyvars t = error $ "gentyvars instance for Term: unimplemented case: "
-                ++ show t
 
 -- Generate fresh type variables for a single command
 instance GenTyVars (Command α) where
@@ -288,16 +251,17 @@ genTypeVars :: Prog α -> Prog α
 genTypeVars p =
   p { prog_of = fst (runState (T.mapM gentyvars (prog_of p)) 0)}
 
+
 ---------
 -- | Misc
 
 boolOfTerm :: Term α -> Bool
 boolOfTerm (TmBool _ b) = b
-boolOfTerm _           = error "boolOf: expected boolean term"
+boolOfTerm _ = error "boolOf: expected boolean term"
 
 intOfTerm :: Term α -> Integer
 intOfTerm (TmInt _ i) = i
-intOfTerm _           = error "intOf: expected integer term"
+intOfTerm _ = error "intOf: expected integer term"
 
 idOfType :: Type -> Maybe Id
 idOfType (TyVar _ x) = Just x

@@ -7,4 +7,4 @@ import System.IO.Unsafe
 -- debugPrint s x = seq (unsafePerformIO $ putStrLn $ s) x
 
 debugPrint :: String -> b -> b
-debugPrint _ x = x
+debugPrint _ = id

@@ -31,7 +31,7 @@
 module Ast (
   Command(..), Prog(..), Term(..), Type(..), TypeScheme(..), Unop(..),
   Binop(..), mkTypeScheme, eraseData, isArithBinop, isComparisonBinop,
-  isBUpdate, binopType, isValue, typeRec, typeRec2
+  isBUpdate, binopType, isValue, typeRec, typeRec2, termRec, termTypeRec
   ) where
 
 import Data.List (intercalate)
@@ -59,32 +59,30 @@ data Type =
   | TyRef Type
   deriving Generic
 
--- A sort of recursion scheme for types. Used for example in
--- freeTyVarsAux in Core.hs.
-typeRec :: Semigroup a => (Type -> a) -> Type -> a
-typeRec f ty@(TyArrow s t) = f ty <> typeRec f s <> typeRec f t
-typeRec f ty@(TyPair s t)  = f ty <> typeRec f s <> typeRec f t
-typeRec f ty@(TySum s t)   = f ty <> typeRec f s <> typeRec f t
-typeRec f ty@(TyRef s)     = f ty <> typeRec f s
-typeRec f ty               = f ty
+-- A recursion scheme for types.
+typeRec :: (Type -> Type) -> Type -> Type
+typeRec f (TyArrow s t) = f $ TyArrow (typeRec f s) (typeRec f t)
+typeRec f (TyPair s t)  = f $ TyPair (typeRec f s) (typeRec f t)
+typeRec f (TySum s t)   = f $ TySum (typeRec f s) (typeRec f t)
+typeRec f (TyRef s)     = f $ TyRef $ typeRec f s
+typeRec f ty            = f ty
 
--- Another
-typeRec2 :: (Type -> Type) -> Type -> Type
-typeRec2 f ty@(TyArrow s t) = f $ TyArrow (typeRec2 f s) (typeRec2 f t)
-typeRec2 f ty@(TyPair s t)  = f $ TyPair (typeRec2 f s) (typeRec2 f t)
-typeRec2 f ty@(TySum s t)   = f $ TySum (typeRec2 f s) (typeRec2 f t)
-typeRec2 f ty@(TyRef s)     = f $ TyRef $ typeRec2 f s
+-- A kind of catamorphism for types, given that the output type is a
+-- semigroup (can be built up using an associative operation). Used
+-- for example in the 'freeTyVarsAux' function in Core.hs.
+typeRec2 :: Semigroup a => (Type -> a) -> Type -> a
+typeRec2 f ty@(TyArrow s t) = f ty <> typeRec2 f s <> typeRec2 f t
+typeRec2 f ty@(TyPair s t)  = f ty <> typeRec2 f s <> typeRec2 f t
+typeRec2 f ty@(TySum s t)   = f ty <> typeRec2 f s <> typeRec2 f t
+typeRec2 f ty@(TyRef s)     = f ty <> typeRec2 f s
 typeRec2 f ty               = f ty
 
--- flattenType :: Type -> [Type]
--- flattenType = typeRec $ \ty ->
---                           case ty of
 
-
--- Type schemes. A type together with a list of its free type
--- variables. The typechecker computes type schemes for every term,
--- although most have no type variables besides let-bound abstractions
--- which can be generalized.
+-- Type schemes. A type scheme is a type together with a list of its
+-- free type variables. The typechecker computes type schemes for
+-- every term, although most have no type variables except for
+-- let-bound abstractions (but only when they are syntactically values
+-- due to the value restriction).
 data TypeScheme =
   TypeScheme { ts_tyvars_of :: [Id],
                ts_ty_of     :: Type }
@@ -146,35 +144,36 @@ data Term α =
   deriving (Eq, Functor, Generic)
 
 
--- Map a function over terms (like fmap if the subterms were a
--- parameterized type)
+-- A recursion scheme for terms.
+termRec :: (Term α -> Term α) -> Term α -> Term α
+termRec f (TmAbs fi x ty tm) = f $ TmAbs fi x ty (termRec f tm)
+termRec f (TmIf fi tm1 tm2 tm3) =
+  f $ TmIf fi (termRec f tm1) (termRec f tm2) (termRec f tm3)
+termRec f (TmUnop fi u tm) = f $ TmUnop fi u (termRec f tm)
+termRec f (TmBinop fi b tm1 tm2) =
+  f $ TmBinop fi b (termRec f tm1) (termRec f tm2)
+termRec f (TmPair fi tm1 tm2) =
+  f $ TmPair fi (termRec f tm1) (termRec f tm2)
+termRec f (TmInl fi tm ty) = f $ TmInl fi (termRec f tm) ty
+termRec f (TmInr fi tm ty) = f $ TmInr fi (termRec f tm) ty
+termRec f (TmCase fi tm1 x tm2 y tm3) =
+  f $ TmCase fi (termRec f tm1) x (termRec f tm2) y (termRec f tm3)
+termRec f (TmLet fi x tm1 tm2) =
+  f $ TmLet fi x (termRec f tm1) (termRec f tm2)
+termRec f tm = f tm
 
--- termMap :: (Term α -> Term β) -> Term α -> Term β
--- termMap f (TmAbs fi x ty tm) = f $ TmAbs fi x ty (termMap f tm)
--- termMap f (TmApp fi t1 t2) = f $ TmApp fi (termMap f t1) (termMap f t2)
--- termMap f (TmIf fi t1 t2 t3) =
---   f $ TmIf fi (termMap f t1) (termMap f t2) (termMap f t3)
--- termMap f (TmUnop fi u tm) = f $ TmUnop fi u (termMap f tm)
--- termMap f (TmBinop fi b t1 t2) =
---   f $ TmBinop fi b (termMap f t1) (termMap f t2)
--- termMap f (TmPair fi t1 t2) = f $ TmPair fi (termMap f t1) (termMap f t2)
--- termMap f (TmInl fi tm ty) = f $ TmInl fi (termMap f tm) ty
--- termMap f (TmInr fi tm ty) = f $ TmInr fi (termMap f tm) ty
--- termMap f (TmCase fi t1 x t2 y t3) =
---   f $ TmCase fi (termMap f t1) x (termMap f t2) y (termMap f t3)
--- termMap f t = f t
-
--- TODO: recursor / catamorphism for terms? (generalized fold). We
--- could consider doing the functor fixed point stuff (recursion
--- schemes) to get these things for free but I don't know if it would
--- complicate things more than it's worth.
+-- Map a type transformer over a term.
+termTypeRec :: (Type -> Type) -> Term α -> Term α
+termTypeRec f = termRec $
+  \tm -> case tm of
+           TmAbs fi x ty tm -> TmAbs fi x (f ty) tm
+           TmInl fi tm ty -> TmInl fi tm (f ty)
+           TmInr fi tm ty -> TmInr fi tm (f ty)
+           _ -> tm
 
 
 -------------
 -- | Commands
-
--- A command either binds a term to an Id in the global context, or
--- evaluates a term to a normal form.
 
 data Command α =
   CDecl α Id Type

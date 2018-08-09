@@ -54,6 +54,7 @@ letrec triangle = λn. if n = 0 then 0 else n + triangle (n - 1)
 let f = λx. x + 5
 let g = λx. x * 2
 val h : ℤ × ℤ → ℤ × ℤ
+# let h = ⟨f ∘ π₁, g ∘ π₂⟩
 let h = ⟨f ∘ π₁, g ∘ π₂⟩
 〚 h (1, 2) 〛# ==> (6, 4)
 

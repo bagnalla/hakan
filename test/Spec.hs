@@ -16,10 +16,10 @@ prop_tysubst_freetyvars_commute_Type s t x =
   isTyVar s && isTyVar t ==>
   freetyvars (tysubst s t x) == nub (tysubst s t (freetyvars x))
 
-prop_tysubst_freetyvars_commute_Term :: Type -> Type -> (Term α) -> Property
-prop_tysubst_freetyvars_commute_Term s t x =
-  isTyVar s && isTyVar t ==>
-  freetyvars (tysubst s t x) == nub (tysubst s t (freetyvars x))
+-- prop_tysubst_freetyvars_commute_Term :: Type -> Type -> (Term α) -> Property
+-- prop_tysubst_freetyvars_commute_Term s t x =
+--   isTyVar s && isTyVar t ==>
+--   freetyvars (tysubst s t x) == nub (tysubst s t (freetyvars x))
 
 main :: IO ()
 -- Where is withMaxSuccess?

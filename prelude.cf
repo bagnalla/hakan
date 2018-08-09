@@ -34,6 +34,9 @@ let compose = λf. λg. λx. g (f x)
 val tuple : (a → b) → (a → c) → a → b × c
 let tuple = λf. λg. λx. (f x, g x)
 
+val pair_fun : (a → c) → (b → d) → a × b → c × d
+let pair_fun = λf. λg. λp. (f p₁, g p₂)
+
 # Function cotupling.
 val cotuple : (a → c) → (b → c) → a + b → c
 let cotuple = λf. λg. λs.
@@ -41,10 +44,10 @@ let cotuple = λf. λg. λs.
   | inl x → f x
   | inr y → g y
 
-val curry : ((a × b) → c) → a → b → c
+val curry : (a × b → c) → a → b → c
 let curry = λf. λx. λy. f (x, y)
 
-val uncurry : (a → b → c) → (a × b) → c
+val uncurry : (a → b → c) → a × b → c
 let uncurry = λf. λp. f p₁ p₂
 
 val eval : (a → b) → a → b
@@ -61,3 +64,7 @@ val fact : ℤ → ℤ
 letrec fact = λn.
   if n ≤ 0 then 1 else
   n * fact (n - 1)
+
+
+# misc
+

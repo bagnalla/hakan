@@ -99,6 +99,9 @@ tokens :-
   \]                            { lex' TokenRBracket }
   \⟨                            { lex' TokenLAngle }
   \⟩                            { lex' TokenRAngle }
+  \∥                            { lex' TokenDoubleBar }
+  \▵                            { lex' TokenTriangle }
+  \▿                            { lex' TokenTriangleDown }
   -- eof                        { lex' TokenEOF }
   $alpha [$alpha $digit \_ \']* { lex (TokenId . Id) }
 
@@ -187,6 +190,9 @@ data TokenClass =
   | TokenPi2
   | TokenSmall1
   | TokenSmall2
+  | TokenDoubleBar
+  | TokenTriangle
+  | TokenTriangleDown
     deriving (Eq,Show)
 
 -- For nice parser error messages.
@@ -254,6 +260,9 @@ unLex TokenTimes           = "×"
 unLex TokenOTimes          = "⊗"
 unLex TokenSmall1          = "₁"
 unLex TokenSmall2          = "₂"
+unLex TokenDoubleBar       = "∥"
+unLex TokenTriangle        = "▵"
+unLex TokenTriangleDown    = "▿"
 unLex TokenEOF             = "<EOF>"
 
 alexEOF :: Alex Token
