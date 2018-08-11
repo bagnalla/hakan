@@ -72,3 +72,7 @@ let h = ⟨f ∘ π₁, g ∘ π₂⟩
 # let g = λx:Bool. tt
 # 〚 (λf. λg. λx. g (f x)) g f 0 〛
 # 〚 let asdf = compose g f 0 in asdf 〛
+
+# data MyType a =
+#   | Bakow
+#   | Muh ℤ

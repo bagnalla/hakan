@@ -14,7 +14,8 @@ module Core (
   unify,
   tysubstAll,
   idOfType,
-  isTyVar
+  isTyVar,
+  fixTy
   ) where
 
 import Control.Monad.State
@@ -190,6 +191,15 @@ instance FreeTyVars TypeScheme where
 class GenTyVars a where
   gentyvars :: a -> State Int a
 
+instance GenTyVars a => GenTyVars [a] where
+  gentyvars = mapM gentyvars
+
+-- Make a special instance for constructor lists to make it easy.
+instance GenTyVars (Id, [Type]) where
+  gentyvars (x, tys) = do
+    tys' <- mapM gentyvars tys
+    return (x, tys')
+
 -- Generate fresh type variables for a type
 instance GenTyVars Type where
   gentyvars (TyVar b (Id "")) = do
@@ -202,6 +212,8 @@ instance GenTyVars Type where
   gentyvars (TySum ty1 ty2) =
     pure TySum <*> gentyvars ty1 <*> gentyvars ty2
   gentyvars (TyRef ty) = TyRef <$> gentyvars ty
+  gentyvars (TyVariant nm tyvars ctors) =
+    TyVariant nm tyvars <$> gentyvars ctors
   gentyvars ty = return ty
 
 
@@ -230,6 +242,8 @@ instance GenTyVars (Term α) where
     return $ TmCase fi discrim' nm1 tm1' nm2 tm2'
   gentyvars (TmLet fi x tm1 tm2) =
     pure (TmLet fi x) <*> gentyvars tm1 <*> gentyvars tm2
+  gentyvars (TmVariant fi nm tm) =
+    pure (TmVariant fi nm) <*> gentyvars tm
   gentyvars t@(TmVar _ _) = return t
   gentyvars t@(TmUnit _) = return t
   gentyvars t@(TmBool _ _) = return t
@@ -240,6 +254,8 @@ instance GenTyVars (Command α) where
   gentyvars (CDecl fi x ty) = CDecl fi x <$> gentyvars ty
   gentyvars (CLet fi x t) = CLet fi x <$> gentyvars t
   gentyvars (CEval fi t) = CEval fi <$> gentyvars t
+  gentyvars (CData fi nm tyvars ctors) =
+    CData fi nm tyvars <$> gentyvars ctors
 
 -- -- Generate fresh type variables for an entire program.
 -- instance GenTyVars (Prog α) where
@@ -250,6 +266,26 @@ instance GenTyVars (Command α) where
 genTypeVars :: Prog α -> Prog α
 genTypeVars p =
   p { prog_of = fst (runState (T.mapM gentyvars (prog_of p)) 0)}
+
+
+--------------------------
+-- | Recursive type stuff
+
+abstractTy :: Id -> Type -> Type -> Type
+abstractTy x ty s = tysubst s (TyVar False x) ty
+
+abstractTys :: [Id] -> [Type] -> [Type] -> [Type]
+abstractTys xs tys tys' =
+  Prelude.map (\ty -> foldl f ty (zip xs tys')) tys
+  where f acc (x, ty) =
+          tysubst (TyVar False x) ty acc
+
+fixTy :: Id -> Type -> Type
+fixTy x ty = fix (abstractTy x ty)
+
+fixTys :: [Id] -> [Type] -> [Type]
+fixTys xs tys =
+  fix (abstractTys xs tys) 
 
 
 ---------
@@ -312,12 +348,16 @@ data_of_term t =
     TmInr fi _ _        -> fi
     TmCase fi _ _ _ _ _ -> fi
     TmLet fi _ _ _      -> fi
+    TmVariant fi _ _    -> fi
 
 data_of_command :: Command α -> α
 data_of_command c =
   case c of
-    CLet fi _ _ -> fi
-    CEval fi _   -> fi
+    CDecl fi _ _   -> fi
+    CLet fi _ _    -> fi
+    CEval fi _     -> fi
+    CCheck fi _    -> fi
+    CData fi _ _ _ -> fi
 
 term_of_command :: Command α -> Term α
 term_of_command c =

@@ -28,9 +28,9 @@ interpProg =
 interpCommands :: [Command ()] -> InterpM Value
 interpCommands [] = return VUnit
 interpCommands (CDecl _ _ _ : cs) = interpCommands cs
+interpCommands (CData _ _ _ _ : cs) = interpCommands cs
 interpCommands (CLet _ nm tm : cs) = do
   v <- eval tm
   local (Env . add nm v . unEnv) $ interpCommands cs
 interpCommands (CEval _ tm : []) = eval tm
 interpCommands (CEval _ tm : cs) = eval tm >> interpCommands cs
--- interpCommands (CCheck _ tm : 

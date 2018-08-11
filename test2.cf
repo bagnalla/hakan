@@ -1,0 +1,4 @@
+
+data MyType a =
+  | Foo
+  | Bar ℤ

@@ -15,7 +15,8 @@ import Data.Maybe (fromJust)
 
 import Ast
 import Core (data_of_term, data_of_command, FreeTyVars(..), ConstrSet,
-             TypeSubst, unify, idOfType, TySubstable(..), tysubstAll)
+             TypeSubst, unify, idOfType, TySubstable(..), tysubstAll,
+             fixTy)
 import Gensym (nextSym, nextSym2, nextSym3)
 import Parser
 import Symtab (Symtab, Id(..), empty, add, get, exists)
@@ -38,17 +39,39 @@ instance TySubstable TyData where
 -----------------
 -- | Typechecker
 
-type Context = Symtab TypeScheme
+data Context =
+  Context {
+  -- explicit type declarations
+  ctx_decls :: Symtab TypeScheme,
+  -- regular typing context
+  ctx_gamma :: Symtab TypeScheme,
+  -- user-defined datatypes
+  ctx_datatypes :: Symtab Type,
+  -- map constructor names to their datatypes
+  ctx_ctors :: Symtab Type
+}
+
+initCtx :: Context
+initCtx = Context { ctx_decls = empty
+                  , ctx_gamma = empty
+                  , ctx_datatypes = empty
+                  , ctx_ctors = empty }
+
+updDecls :: (Symtab TypeScheme -> Symtab TypeScheme) -> Context -> Context
+updDecls f ctx = ctx { ctx_decls = f $ ctx_decls ctx }
+
+updGamma :: (Symtab TypeScheme -> Symtab TypeScheme) -> Context -> Context
+updGamma f ctx = ctx { ctx_gamma = f $ ctx_gamma ctx }
 
 -- The reader carries two contexts. The first is for explicit type
 -- declarations given by the programmer, and the second is the regular
 -- typing context.
 type TycheckM a =
-  ReaderT (Context, Context) (ExceptT String (StateT Int Identity)) a
+  ReaderT Context (ExceptT String (StateT Int Identity)) a
 
 runTycheck :: TycheckM a -> Either String a
 runTycheck t =
-  fst $ runIdentity (runStateT (runExceptT (runReaderT t (empty, empty))) 0)
+  fst $ runIdentity (runStateT (runExceptT (runReaderT t initCtx)) 0)
 
 unifyError :: Show α => Type -> Type -> α -> TycheckM b
 unifyError s t fi =
@@ -66,7 +89,7 @@ tryUnify fi c f =
 tycheckTerm :: Show α => Term α -> TycheckM (Term TyData, ConstrSet)
 tycheckTerm (TmVar fi x) = do
   -- 'asks' takes a function mapping the context to a value
-  tyscheme <- asks (Symtab.get x . snd)
+  tyscheme <- asks (Symtab.get x . ctx_gamma)
   case tyscheme of
     Just tyscheme' -> do
       ty <- instantiate_tyscheme tyscheme'
@@ -79,8 +102,7 @@ tycheckTerm (TmVar fi x) = do
       " at " ++ show fi
 
 tycheckTerm (TmAbs fi x ty tm) = do
-  (tm', c) <- local (\(decls, ctx) ->
-                       (decls, add x (mkTypeScheme [] ty) ctx)) $
+  (tm', c) <- local (updGamma $ add x (mkTypeScheme [] ty)) $
               tycheckTerm tm
   let ty' = ty_of_term tm'
   debugPrint ("abs nm: " ++ show x) $
@@ -238,11 +260,9 @@ tycheckTerm (TmCase fi discrim nm1 t1 nm2 t2) = do
   (x, y, z) <- nextSym3 "?Y_"
   let (tyx, tyy, tyz) = (TyVar False (Id x), TyVar False (Id y),
                          TyVar False (Id z))
-  (t1', c2) <- local (\(decls, ctx) ->
-                        (decls, add nm1 (mkTypeScheme [] tyy) ctx)) $
+  (t1', c2) <- local (updGamma $ add nm1 (mkTypeScheme [] tyy)) $
                tycheckTerm t1
-  (t2', c3) <- local (\(decls, ctx) ->
-                        (decls, add nm2 (mkTypeScheme [] tyz) ctx)) $
+  (t2', c3) <- local (updGamma $ add nm2 (mkTypeScheme [] tyz)) $
                tycheckTerm t2
   let c = c1 ++ c2 ++ c3 ++ [(ty, TySum tyy tyz),
                              (ty_of_term t1', ty_of_term t2')]
@@ -258,8 +278,7 @@ tycheckTerm (TmLet fi x tm1 tm2) = do
               else return $ mkTypeScheme [] ty1
   debugPrint ("let ty: " ++ show ty1) $
     debugPrint ("let tyscheme: " ++ show tyscheme ++ "\n") $ do
-    (tm2', c2) <- local (\(decls, ctx) ->
-                           (decls, add x tyscheme ctx)) $
+    (tm2', c2) <- local (updGamma $ add x tyscheme)  $
                   tycheckTerm tm2
     let c = c1 ++ c2
     tryUnify fi c $
@@ -278,6 +297,10 @@ tycheckCommand (CEval fi t) = do
   (t', _) <- tycheckTerm t
   return $ CEval (mkData (ty_of_term t')) t'
 
+tycheckCommand (CData fi nm tyvars ctors) =
+  return $ CData (mkData TyUnit) nm tyvars ctors
+
+
 tycheckCommands :: Show α => [Command α] -> TycheckM [Command TyData]
 tycheckCommands [] = return []
 tycheckCommands (com:coms) = do
@@ -290,11 +313,12 @@ tycheckCommands (com:coms) = do
       debugPrint ("CDecl ty: " ++ show ty) $
         debugPrint ("CDecl tyscheme: " ++ show tyscheme) $
         debugPrint ("CDecl fvs: " ++ show fvs) $ do
-        coms' <- local (\(decls, ctx) -> (add x tyscheme decls, ctx)) $
+        coms' <- local (updDecls $ add x tyscheme) $
                  tycheckCommands coms
         return $ com' : coms'
     CLet fi x tm -> do
-      (decls, ctx) <- ask
+      decls <- asks ctx_decls
+      gamma <- asks ctx_gamma
       let ty = ty_of_term tm
       -- Enforce value restriction since we have mutable references.
       -- I.e., only generalize the type when then term is a syntactic
@@ -307,16 +331,26 @@ tycheckCommands (com:coms) = do
           -- want to use the exact type declared by the programmer.
           _ <- unify_tyschemes (data_of_command com) tyscheme declTyscheme
           let tyscheme' = loosen_tyscheme declTyscheme
-          coms' <- local (const (decls, add x tyscheme' ctx)) $
+          coms' <- local (updGamma $ const $ add x tyscheme' gamma) $
                    tycheckCommands coms
           return $ com' : coms'
         Nothing -> do
-          coms' <- local (const (decls, add x tyscheme ctx)) $
+          coms' <- local (updGamma $ const $ add x tyscheme gamma) $
                    tycheckCommands coms
           return $ com' : coms'
+    CData fi nm tyvars ctors -> do
+      let ty = fixTy nm $ TyVariant nm tyvars ctors
+      coms' <- local (\ctx ->
+                        ctx { ctx_datatypes = add nm ty $ ctx_datatypes ctx
+                            , ctx_ctors = foldl (\acc x -> add x ty acc)
+                              (ctx_ctors ctx) (fst $ unzip ctors)
+                            }) $
+               tycheckCommands coms
+      return $ com' : coms'
     _ -> do
       coms' <- tycheckCommands coms
       return $ com' : coms'
+
 
 tycheckProg :: Show α => Prog α -> TycheckM (Prog TyData)
 tycheckProg p = do
@@ -335,10 +369,11 @@ ty_of_term = unTyData . data_of_term
 
 generalize_ty :: Type -> TycheckM TypeScheme
 generalize_ty ty = do
-  (_, ctx) <- ask
+  -- (_, ctx) <- ask
+  gamma <- asks ctx_gamma
   let fvs= freetyvars ty
   let generalizable = map (fromJust . idOfType)
-        (filter (\(TyVar _ x) -> not $ x `exists` ctx) fvs)
+        (filter (\(TyVar _ x) -> not $ x `exists` gamma) fvs)
   return $ mkTypeScheme generalizable ty
 
 -- Passing False for the type variables rigidness doesn't matter since

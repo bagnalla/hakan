@@ -35,6 +35,7 @@ import Core (data_of_term)
   evaluate     { Token $$ TokenEval }
   check        { Token $$ TokenCheck }
   id           { Token _ (TokenId _) }
+  capid        { Token _ (TokenCapId _) }
 --  fst          { Token $$ TokenFst }
 --  snd          { Token $$ TokenSnd }
   "π₁"         { Token $$ TokenPi1 }
@@ -85,6 +86,7 @@ import Core (data_of_term)
   '∥'          { Token $$ TokenDoubleBar }
   '▵'          { Token $$ TokenTriangle }
   '▿'          { Token $$ TokenTriangleDown }
+  data         { Token $$ TokenData }
   -- eof          { Token $$ TokenEOF }
 
 %nonassoc ':'
@@ -128,9 +130,7 @@ VType :
   | bool { Ast.TyBool }
   | int { Ast.TyInt }
   | '(' DeclType ')' { $2 }
-  | id { case $1 of
-           Token _ (TokenId x) ->
-             Ast.TyVar True x }
+  | id { Ast.TyVar True $ idFromToken $1 }
 
 Type :
   AType { $1 }
@@ -152,9 +152,7 @@ Term :
   AppTerm { $1 }
   | if Term then Term else Term { Ast.TmIf $1 $2 $4 $6 }
   | '\\' Id opt(TyBinder) '.' Term {
-    case $2 of
-      Token _ (TokenId x) ->
-        Ast.TmAbs $1 x (case $3 of
+        Ast.TmAbs $1 (idFromToken $2) (case $3 of
 			 Nothing -> Ast.TyVar False (Id "")
 			 Just ty -> ty) $5 }
   | '-' Term %prec UNOP { Ast.TmUnop $1 Ast.UMinus $2 }
@@ -181,9 +179,7 @@ Term :
 	(Token _ (TokenId nm1), Token _ (TokenId nm2)) ->
 	  Ast.TmCase $1 $2 nm1 $8 nm2 $13 }
   | Term ';' Term { Ast.TmApp $2 (Ast.TmAbs $2 (Id "_") Ast.TyUnit $3) $1 }
-  | let id '=' Term in Term { case $2 of
-                                Token fi (TokenId x) ->
-                                  Ast.TmLet $1 x $4 $6 }
+  | let id '=' Term in Term { Ast.TmLet $1 (idFromToken $2) $4 $6 }
   | Term '▿' Term
     { Ast.TmApp $2 (Ast.TmApp $2 (Ast.TmVar $2 (Id "cotuple")) $1) $3 }
   | Term '▵' Term
@@ -201,12 +197,8 @@ ATerm :
   tt { Ast.TmUnit $1 }
   | true { Ast.TmBool $1 True }
   | false { Ast.TmBool $1 False }
-  | intVal { case $1 of
-	Token fi (TokenInt i) -> Ast.TmInt fi i }
-  | id {
-    case $1 of
-      Token fi (TokenId x) ->
-        Ast.TmVar fi x }
+  | intVal { Ast.TmInt (infoFromToken $1) (intFromToken $1) }
+  | id { Ast.TmVar (infoFromToken $1) (idFromToken $1) }
   | "π₁" { Ast.TmVar $1 (Id "proj1") }
   | "π₂" { Ast.TmVar $1 (Id "proj2") }
   | '(' Term ')' { $2 }
@@ -218,22 +210,32 @@ ATerm :
   | ATerm '₁' { Ast.TmUnop $2 Ast.UFst $1 }
   | ATerm '₂' { Ast.TmUnop $2 Ast.USnd $1 }
 
+list(p) :
+--  p { [$1] }
+  p list(p) { $1 : $2 }
+  | { [] }
+
+barlist(p) :
+--  p { [$1] }
+  '|' p barlist(p) { $2 : $3 }
+  | { [] }
+
+Ctor :
+  capid list(Type) { (capidFromToken $1, $2) }
+
 Command :
-  val id TyDeclBinder {
-    case $2 of
-      Token fi (TokenId x) ->
-        Ast.CDecl fi x $3 }
-  | let id Binder {
-      case $2 of
-        Token fi (TokenId x) ->
-          Ast.CLet fi x $3 }
+  val id TyDeclBinder { Ast.CDecl (infoFromToken $2) (idFromToken $2) $3 }
+  | let id Binder { Ast.CLet (infoFromToken $2) (idFromToken $2) $3 }
   | letrec id Binder {
-      case $2 of
-        Token fi (TokenId x) ->
-	  Ast.CLet fi x (Ast.TmUnop fi Ast.UFix
-			 (Ast.TmAbs fi x (Ast.TyVar False (Id "")) $3)) }
+      let (fi, x) = (infoFromToken $2, idFromToken $2) in
+        Ast.CLet fi x (Ast.TmUnop fi Ast.UFix (Ast.TmAbs fi x
+                 (Ast.TyVar False (Id "")) $3)) }
   | evaluate Term { Ast.CEval $1 $2 }
   | '〚' Term '〛' { Ast.CEval $1 $2 }
+  | data capid list(id) '=' barlist(Ctor)
+      { case $2 of
+          Token fi (TokenCapId x) -> 
+            Ast.CData fi x (map capidFromToken $3) $5 }
 
 TyBinder :
   ':' Type { $2 }
@@ -260,4 +262,20 @@ happyError (Token p t) =
 
 parseProg :: FilePath -> String -> Either String (Ast.Prog AlexPosn)
 parseProg = runAlex' parse
+
+idFromToken :: Token -> Id
+idFromToken tok = case tok of
+  Token _ (TokenId x) -> x
+
+capidFromToken :: Token -> Id
+capidFromToken tok = case tok of
+  Token _ (TokenCapId x) -> x
+
+intFromToken :: Token -> Integer
+intFromToken tok = case tok of
+  Token _ (TokenInt i) -> i
+
+infoFromToken :: Token -> AlexPosn
+infoFromToken tok = case tok of
+  Token fi _ -> fi
 }

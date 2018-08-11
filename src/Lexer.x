@@ -21,6 +21,7 @@ import Symtab (Id(..))
 %wrapper "monadUserState"
 $digit = 0-9
 $alpha = [A-Za-z]
+$capital = [A-Z]
 tokens :-
 
   "#".*                         ;
@@ -102,8 +103,10 @@ tokens :-
   \∥                            { lex' TokenDoubleBar }
   \▵                            { lex' TokenTriangle }
   \▿                            { lex' TokenTriangleDown }
+  data                          { lex' TokenData }
   -- eof                        { lex' TokenEOF }
-  $alpha [$alpha $digit \_ \']* { lex (TokenId . Id) }
+  $capital [$alpha $digit \_ \']* { lex (TokenCapId . Id) }
+  $alpha [$alpha $digit \_ \']*   { lex (TokenId . Id) }
 
 {
 -- To improve error messages, We keep the path of the file we are
@@ -125,6 +128,7 @@ data Token = Token AlexPosn TokenClass
 
 data TokenClass =
   TokenId Id
+  | TokenCapId Id
   | TokenLParen
   | TokenRParen
   | TokenColon
@@ -193,11 +197,13 @@ data TokenClass =
   | TokenDoubleBar
   | TokenTriangle
   | TokenTriangleDown
+  | TokenData
     deriving (Eq,Show)
 
 -- For nice parser error messages.
 unLex :: TokenClass -> String
-unLex (TokenId id)         = show id
+unLex (TokenId x)          = show x
+unLex (TokenCapId x)       = show x
 unLex TokenLParen          = "("
 unLex TokenRParen          = ")"
 unLex TokenColon           = ":"
@@ -263,6 +269,7 @@ unLex TokenSmall2          = "₂"
 unLex TokenDoubleBar       = "∥"
 unLex TokenTriangle        = "▵"
 unLex TokenTriangleDown    = "▿"
+unLex TokenData            = "data"
 unLex TokenEOF             = "<EOF>"
 
 alexEOF :: Alex Token

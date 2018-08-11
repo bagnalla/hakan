@@ -57,7 +57,22 @@ data Type =
   | TyPair Type Type
   | TySum Type Type
   | TyRef Type
+  | TyVariant Id [Id] [(Id, [Type])]
   deriving Generic
+
+-- data Variant = Variant
+--   { variant_nm :: Id
+--   , variant_tyvars :: [Id]
+--   , variant_ctors :: [(Id, [Type])] }
+
+-- instance Arbitrary Variant where
+--   arbitrary = do
+--     nm <- arbitrary
+--     tyvars <- arbitrary
+--     ctors <- arbitrary
+--     return $ Variant { variant_nm = nm
+--                      , variant_tyvars = tyvars
+--                      , variant_ctors = ctors }
 
 -- A recursion scheme for types.
 typeRec :: (Type -> Type) -> Type -> Type
@@ -141,7 +156,27 @@ data Term α =
   | TmInr α (Term α) Type
   | TmCase α (Term α) Id (Term α) Id (Term α)
   | TmLet α Id (Term α) (Term α)
+  | TmVariant α Id [Term α]
   deriving (Eq, Functor, Generic)
+
+data Pattern =
+  PVar Id
+  | PUnit
+  | PBool Bool
+  | PInt Integer
+  | PPair Pattern Pattern
+  | PVariant Id [Pattern]
+
+data Test =
+  Test1 Int Int
+  | Test2 Bool Bool
+
+testthing = Test1 0 -- constructors can be partially applied! We need
+                    -- to actually introduce a curried function for
+                    -- each constructor.
+
+testthing2 :: Id -> Term ()
+testthing2 = TmVar () -- !!!
 
 
 -- A recursion scheme for terms.
@@ -160,6 +195,8 @@ termRec f (TmCase fi tm1 x tm2 y tm3) =
   f $ TmCase fi (termRec f tm1) x (termRec f tm2) y (termRec f tm3)
 termRec f (TmLet fi x tm1 tm2) =
   f $ TmLet fi x (termRec f tm1) (termRec f tm2)
+termRec f (TmVariant fi x tms) =
+  f $ TmVariant fi x $ map (termRec f) tms
 termRec f tm = f tm
 
 -- Map a type transformer over a term.
@@ -180,6 +217,7 @@ data Command α =
   | CLet α Id (Term α)
   | CEval α (Term α)
   | CCheck α (Term α)
+  | CData α Id [Id] [(Id, [Type])]
   deriving (Functor, Generic)
 
 
@@ -211,6 +249,8 @@ instance Show Type where
   show (TyPair t1 t2) = "(" ++ show t1 ++ " * " ++ show t2 ++ ")"
   show (TySum t1 t2) = "(" ++ show t1 ++ " + " ++ show t2 ++ ")"
   show (TyRef ty) = "(TyRef " ++ show ty ++ ")"
+  show (TyVariant nm tyvars ctors) = "(TyVariant " ++ show nm ++ " "
+    ++ show tyvars ++ " " ++ show ctors ++ ")"
 
 instance Eq Type where
   TyUnit == TyUnit = True
@@ -220,6 +260,7 @@ instance Eq Type where
   TyPair s1 t1 == TyPair s2 t2 = s1 == s2 && t1 == t2
   TySum s1 t1 == TySum s2 t2 = s1 == s2 && t1 == t2
   TyRef t1 == TyRef t2 = t1 == t2
+  TyVariant nm1 _ _ == TyVariant nm2 _ _ = nm1 == nm2
   TyVar _ x == TyVar _ y = x == y
   t1 == t2 = False
 
@@ -229,6 +270,8 @@ instance Arbitrary Type where
   shrink (TyPair s t) = [s, t]
   shrink (TySum s t) = [s, t]
   shrink (TyRef s) = [s]
+  shrink (TyVariant _ _ ctors) =
+    concat $ concat $ shrink $ snd $ unzip ctors
   shrink _ = []
 
 
@@ -256,7 +299,9 @@ instance Show (Term α) where
     " " ++ show nm2 ++ " " ++ show t2 ++ ")"
   show (TmLet _ x tm1 tm2) =
     "(TmLet " ++ show x ++ " " ++ show tm1 ++ " " ++ show tm2 ++ ")"
-
+  show (TmVariant _ x tm) =
+    "(TmVariant " ++ show x ++ " " ++ show tm ++ ")"
+         
 instance Show α => Show (Command α) where
   show (CDecl _ s t) = "(CDecl " ++ show s ++ " " ++ show t ++ ")"
   show (CLet _ s t)  = "(CLet " ++ show s ++ " " ++ show t ++ ")"
@@ -280,6 +325,7 @@ isValue (TmInt _ _) = True
 isValue (TmPair _ t1 t2) = isValue t1 && isValue t2
 isValue (TmInl _ tm _) = isValue tm
 isValue (TmInr _ tm _) = isValue tm
+isValue (TmVariant _ _ tms) = and (map isValue tms)
 isValue _ = False
 
 isArithBinop :: Binop -> Bool
@@ -294,7 +340,7 @@ isComparisonBinop BAnd = True
 isComparisonBinop BOr  = True
 isComparisonBinop _    = False
 
-isBUpdate :: Binop -> Bool
+isBUpdate:: Binop -> Bool
 isBUpdate BUpdate = True
 isBUpdate _ = False
 
@@ -312,10 +358,3 @@ binopType BGe     = TyBool
 binopType BAnd    = TyBool
 binopType BOr     = TyBool
 binopType BUpdate = TyUnit
-
--- isSimpleType :: Type -> Bool
--- isSimpleType TyUnit = True
--- isSimpleType TyBool = True
--- isSimpleType TyInt = True
--- isSimpleType (TyVar _ _) = True
--- isSimpleType _ = False
