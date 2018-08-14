@@ -6,8 +6,6 @@
 module Core (
   TySubstable(..),
   genTypeVars,
-  data_of_term,
-  data_of_command,
   FreeTyVars(..),
   ConstrSet,
   TypeSubst,
@@ -18,6 +16,7 @@ module Core (
   fixTy
   ) where
 
+import Control.Applicative (liftA2)
 import Control.Monad.State
 import Data.Bifunctor
 import Data.List (nub)
@@ -63,6 +62,11 @@ unify ((s, t) : xs) =
     let s' = tyOfRefType s
         t' = tyOfRefType t in
       unify $ (s', t') : xs
+  else if isVariantTy s && isVariantTy t &&
+          idOfTy s == idOfTy t then
+    let s' = tysOfTy s
+        t' = tysOfTy t in
+      unify $ zip s' t' ++ xs
   else
     -- Failed to unify s and t
     Left (s, t)
@@ -191,14 +195,14 @@ instance FreeTyVars TypeScheme where
 class GenTyVars a where
   gentyvars :: a -> State Int a
 
+instance GenTyVars Id where
+  gentyvars = return
+
 instance GenTyVars a => GenTyVars [a] where
   gentyvars = mapM gentyvars
 
--- Make a special instance for constructor lists to make it easy.
-instance GenTyVars (Id, [Type]) where
-  gentyvars (x, tys) = do
-    tys' <- mapM gentyvars tys
-    return (x, tys')
+instance (GenTyVars a, GenTyVars b) => GenTyVars (a, b) where
+  gentyvars = uncurry (liftA2 (,)) . bimap gentyvars gentyvars
 
 -- Generate fresh type variables for a type
 instance GenTyVars Type where
@@ -215,7 +219,6 @@ instance GenTyVars Type where
   gentyvars (TyVariant nm tyvars ctors) =
     TyVariant nm tyvars <$> gentyvars ctors
   gentyvars ty = return ty
-
 
 -- Generate fresh type variables for a single term (including its
 -- subterms).
@@ -243,11 +246,16 @@ instance GenTyVars (Term α) where
   gentyvars (TmLet fi x tm1 tm2) =
     pure (TmLet fi x) <*> gentyvars tm1 <*> gentyvars tm2
   gentyvars (TmVariant fi nm tm) =
-    pure (TmVariant fi nm) <*> gentyvars tm
+    TmVariant fi nm <$> gentyvars tm
+  gentyvars (TmMatch fi discrim cases) =
+    pure (TmMatch fi) <*> gentyvars discrim <*> gentyvars cases    
   gentyvars t@(TmVar _ _) = return t
   gentyvars t@(TmUnit _) = return t
   gentyvars t@(TmBool _ _) = return t
   gentyvars t@(TmInt _ _) = return t
+
+instance GenTyVars Pattern where
+  gentyvars = return
 
 -- Generate fresh type variables for a single command
 instance GenTyVars (Command α) where
@@ -317,6 +325,10 @@ isTyRef :: Type -> Bool
 isTyRef (TyRef _) = True
 isTyRef _ = False
 
+isVariantTy :: Type -> Bool
+isVariantTy (TyVariant _ _ _) = True
+isVariantTy _ = False
+
 isRigid :: Type -> Bool
 isRigid (TyVar True _) = True
 isRigid _ = False
@@ -331,36 +343,11 @@ tyOfRefType :: Type -> Type
 tyOfRefType (TyRef t) = t
 tyOfRefType _ = error "tyOfRef: expected ref type"
 
-data_of_term :: Term α -> α
-data_of_term t =
-  case t of
-    TmVar fi _          -> fi
-    TmAbs fi _ _ _      -> fi
-    TmApp fi _ _        -> fi
-    TmUnit fi           -> fi
-    TmBool fi _         -> fi
-    TmIf fi _ _ _       -> fi
-    TmInt fi _          -> fi
-    TmUnop fi _ _       -> fi
-    TmBinop fi _ _ _    -> fi
-    TmPair fi _ _       -> fi
-    TmInl fi _ _        -> fi
-    TmInr fi _ _        -> fi
-    TmCase fi _ _ _ _ _ -> fi
-    TmLet fi _ _ _      -> fi
-    TmVariant fi _ _    -> fi
+idOfTy :: Type -> Id
+idOfTy (TyVar _ x) = x
+idOfTy (TyVariant x _ _) = x
+idOfTy _ = error "idOfTy: expected variable or variant type"
 
-data_of_command :: Command α -> α
-data_of_command c =
-  case c of
-    CDecl fi _ _   -> fi
-    CLet fi _ _    -> fi
-    CEval fi _     -> fi
-    CCheck fi _    -> fi
-    CData fi _ _ _ -> fi
-
-term_of_command :: Command α -> Term α
-term_of_command c =
-  case c of
-    CLet _ _ t -> t
-    CEval _ t   -> t
+tysOfTy :: Type -> [Type]
+tysOfTy (TyVariant _ _ ctors) = concat $ snd <$> ctors
+tysOfTy _ = error "tysOfTy: expected variant type"

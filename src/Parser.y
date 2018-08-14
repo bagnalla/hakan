@@ -8,7 +8,7 @@ module Parser( parseProg ) where
 import Lexer
 import qualified Ast
 import Symtab (Id(..))
-import Core (data_of_term)
+import Ast (data_of_term)
 }
 
 %name parse
@@ -87,6 +87,9 @@ import Core (data_of_term)
   '▵'          { Token $$ TokenTriangle }
   '▿'          { Token $$ TokenTriangleDown }
   data         { Token $$ TokenData }
+  destruct     { Token $$ TokenDestruct }
+  as           { Token $$ TokenAs }
+  end           { Token $$ TokenEnd }
   -- eof          { Token $$ TokenEOF }
 
 %nonassoc ':'
@@ -123,6 +126,13 @@ AType :
   | bool { Ast.TyBool }
   | int { Ast.TyInt }
   | '(' Type ')' { $2 }
+--  | capid list(id) { Ast.TyName (idFromToken $1) (map idFromToken $2) }
+  | capid Idlist { Ast.TyName (idFromToken $1) $2 }
+
+-- TODO: this is pointless I think. Just use list(id).
+Idlist :
+  id Idlist { idFromToken $1 : $2 }
+  | { [] }
 
 -- Atomic types including type variables
 VType :
@@ -131,6 +141,12 @@ VType :
   | int { Ast.TyInt }
   | '(' DeclType ')' { $2 }
   | id { Ast.TyVar True $ idFromToken $1 }
+--  | capid list(id) { Ast.TyName (idFromToken $1) (map idFromToken $2) }
+  | capid Idlist { Ast.TyName (idFromToken $1) $2 }
+
+--AppType :
+--  AType { $1 }
+--  | AppType AType { Ast.TmApp (data_of_term $1) $1 $2 }
 
 Type :
   AType { $1 }
@@ -184,6 +200,7 @@ Term :
     { Ast.TmApp $2 (Ast.TmApp $2 (Ast.TmVar $2 (Id "cotuple")) $1) $3 }
   | Term '▵' Term
     { Ast.TmApp $2 (Ast.TmApp $2 (Ast.TmVar $2 (Id "tuple")) $1) $3 }
+  | destruct Term as barlist(Case) end { Ast.TmMatch $1 $2 $4 }
 
 AppTerm :
   ATerm { $1 }
@@ -199,6 +216,7 @@ ATerm :
   | false { Ast.TmBool $1 False }
   | intVal { Ast.TmInt (infoFromToken $1) (intFromToken $1) }
   | id { Ast.TmVar (infoFromToken $1) (idFromToken $1) }
+  | capid { Ast.TmVar (infoFromToken $1) (idFromToken $1) }
   | "π₁" { Ast.TmVar $1 (Id "proj1") }
   | "π₂" { Ast.TmVar $1 (Id "proj2") }
   | '(' Term ')' { $2 }
@@ -210,18 +228,32 @@ ATerm :
   | ATerm '₁' { Ast.TmUnop $2 Ast.UFst $1 }
   | ATerm '₂' { Ast.TmUnop $2 Ast.USnd $1 }
 
+Case :
+  Pattern arrow Term { ($1, $3) }
+
+Pattern :
+  APattern { $1 }
+  | capid list(APattern) { Ast.PConstructor (idFromToken $1) $2 }
+
+APattern :
+  tt { Ast.PUnit }
+  | true { Ast.PBool True }
+  | false { Ast.PBool False }
+  | intVal { Ast.PInt (intFromToken $1) }
+  | Id { Ast.PVar (idFromToken $1) }
+  | '(' Pattern ')' { $2 }
+  | '(' Pattern ',' Pattern ')' { Ast.PPair $2 $4 }
+
 list(p) :
---  p { [$1] }
   p list(p) { $1 : $2 }
   | { [] }
 
 barlist(p) :
---  p { [$1] }
   '|' p barlist(p) { $2 : $3 }
   | { [] }
 
 Ctor :
-  capid list(Type) { (capidFromToken $1, $2) }
+  capid list(Type) { (idFromToken $1, $2) }
 
 Command :
   val id TyDeclBinder { Ast.CDecl (infoFromToken $2) (idFromToken $2) $3 }
@@ -235,7 +267,7 @@ Command :
   | data capid list(id) '=' barlist(Ctor)
       { case $2 of
           Token fi (TokenCapId x) -> 
-            Ast.CData fi x (map capidFromToken $3) $5 }
+            Ast.CData fi x (map idFromToken $3) $5 }
 
 TyBinder :
   ':' Type { $2 }
@@ -266,9 +298,6 @@ parseProg = runAlex' parse
 idFromToken :: Token -> Id
 idFromToken tok = case tok of
   Token _ (TokenId x) -> x
-
-capidFromToken :: Token -> Id
-capidFromToken tok = case tok of
   Token _ (TokenCapId x) -> x
 
 intFromToken :: Token -> Integer

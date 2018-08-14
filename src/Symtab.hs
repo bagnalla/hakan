@@ -11,7 +11,8 @@ module Symtab (
   keys,
   fold,
   Symtab.map,
-  mapi
+  mapi,
+  assocGet
   ) where
 
 -- Use Haskell's map data structure
@@ -30,6 +31,10 @@ intToId _ = Id "c"
 
 instance Arbitrary Id where
   arbitrary = intToId <$> choose (0, 2)
+
+assocGet :: Id -> [(Id, a)] -> Maybe a
+assocGet _ [] = Nothing
+assocGet x ((y, v) : ys) = if x == y then Just v else assocGet x ys
 
 -- A Symtab maps Ids to values of some type
 type Symtab a = Map.Map Id a

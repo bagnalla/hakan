@@ -2,6 +2,9 @@
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE FlexibleContexts #-}
+
+{-# LANGUAGE EmptyCase #-}
 
 -- | This module defines the internal language syntax.
 
@@ -31,7 +34,8 @@
 module Ast (
   Command(..), Prog(..), Term(..), Type(..), TypeScheme(..), Unop(..),
   Binop(..), mkTypeScheme, eraseData, isArithBinop, isComparisonBinop,
-  isBUpdate, binopType, isValue, typeRec, typeRec2, termRec, termTypeRec
+  isBUpdate, binopType, isValue, typeRec, typeRec2, termRec, termTypeRec,
+  mkArrowType, mkAbs, data_of_term, data_of_command, Pattern(..), typeRecM
   ) where
 
 import Data.List (intercalate)
@@ -57,22 +61,9 @@ data Type =
   | TyPair Type Type
   | TySum Type Type
   | TyRef Type
+  | TyName Id [Id]
   | TyVariant Id [Id] [(Id, [Type])]
   deriving Generic
-
--- data Variant = Variant
---   { variant_nm :: Id
---   , variant_tyvars :: [Id]
---   , variant_ctors :: [(Id, [Type])] }
-
--- instance Arbitrary Variant where
---   arbitrary = do
---     nm <- arbitrary
---     tyvars <- arbitrary
---     ctors <- arbitrary
---     return $ Variant { variant_nm = nm
---                      , variant_tyvars = tyvars
---                      , variant_ctors = ctors }
 
 -- A recursion scheme for types.
 typeRec :: (Type -> Type) -> Type -> Type
@@ -80,9 +71,25 @@ typeRec f (TyArrow s t) = f $ TyArrow (typeRec f s) (typeRec f t)
 typeRec f (TyPair s t)  = f $ TyPair (typeRec f s) (typeRec f t)
 typeRec f (TySum s t)   = f $ TySum (typeRec f s) (typeRec f t)
 typeRec f (TyRef s)     = f $ TyRef $ typeRec f s
+typeRec f (TyVariant nm tyvars ctors) =
+  f $ TyVariant nm tyvars $ map (mapSnd $ map $ typeRec f) ctors
 typeRec f ty            = f ty
 
--- A kind of catamorphism for types, given that the output type is a
+-- A monadic recursion scheme for types.
+typeRecM :: Monad m => (Type -> m Type) -> Type -> m Type
+typeRecM f (TyArrow s t) =
+  pure TyArrow <*> typeRecM f s <*> typeRecM f t >>= f
+typeRecM f (TyPair s t) =
+  pure TyPair <*> typeRecM f s <*> typeRecM f t >>= f
+typeRecM f (TySum s t) =
+  pure TySum <*> typeRecM f s <*> typeRecM f t >>= f
+typeRecM f (TyRef s) = TyRef <$> typeRecM f s >>= f
+typeRecM f (TyVariant nm tyvars ctors) =
+  TyVariant nm tyvars <$> mapM (mapSndM $ mapM (typeRecM f))
+  (return <$> ctors) >>= f
+typeRecM f ty = f ty
+
+-- Another recursion scheme for types, given that the output type is a
 -- semigroup (can be built up using an associative operation). Used
 -- for example in the 'freeTyVarsAux' function in Core.hs.
 typeRec2 :: Semigroup a => (Type -> a) -> Type -> a
@@ -90,6 +97,7 @@ typeRec2 f ty@(TyArrow s t) = f ty <> typeRec2 f s <> typeRec2 f t
 typeRec2 f ty@(TyPair s t)  = f ty <> typeRec2 f s <> typeRec2 f t
 typeRec2 f ty@(TySum s t)   = f ty <> typeRec2 f s <> typeRec2 f t
 typeRec2 f ty@(TyRef s)     = f ty <> typeRec2 f s
+-- typeRec2 f ty@(TyVariant nm tyvars ctors) = error "typeRec2 TODO"
 typeRec2 f ty               = f ty
 
 
@@ -157,6 +165,7 @@ data Term α =
   | TmCase α (Term α) Id (Term α) Id (Term α)
   | TmLet α Id (Term α) (Term α)
   | TmVariant α Id [Term α]
+  | TmMatch α (Term α) [(Pattern, Term α)]
   deriving (Eq, Functor, Generic)
 
 data Pattern =
@@ -165,18 +174,8 @@ data Pattern =
   | PBool Bool
   | PInt Integer
   | PPair Pattern Pattern
-  | PVariant Id [Pattern]
-
-data Test =
-  Test1 Int Int
-  | Test2 Bool Bool
-
-testthing = Test1 0 -- constructors can be partially applied! We need
-                    -- to actually introduce a curried function for
-                    -- each constructor.
-
-testthing2 :: Id -> Term ()
-testthing2 = TmVar () -- !!!
+  | PConstructor Id [Pattern]
+  deriving (Eq, Show)
 
 
 -- A recursion scheme for terms.
@@ -197,6 +196,8 @@ termRec f (TmLet fi x tm1 tm2) =
   f $ TmLet fi x (termRec f tm1) (termRec f tm2)
 termRec f (TmVariant fi x tms) =
   f $ TmVariant fi x $ map (termRec f) tms
+termRec f (TmMatch fi discrim cases) =
+  f $ TmMatch fi (termRec f discrim) $ mapSnd (termRec f) <$> cases
 termRec f tm = f tm
 
 -- Map a type transformer over a term.
@@ -249,6 +250,8 @@ instance Show Type where
   show (TyPair t1 t2) = "(" ++ show t1 ++ " * " ++ show t2 ++ ")"
   show (TySum t1 t2) = "(" ++ show t1 ++ " + " ++ show t2 ++ ")"
   show (TyRef ty) = "(TyRef " ++ show ty ++ ")"
+  show (TyName nm tyvars) =
+    "(TyName " ++ show nm ++ " " ++ show tyvars ++ ")"
   show (TyVariant nm tyvars ctors) = "(TyVariant " ++ show nm ++ " "
     ++ show tyvars ++ " " ++ show ctors ++ ")"
 
@@ -260,6 +263,8 @@ instance Eq Type where
   TyPair s1 t1 == TyPair s2 t2 = s1 == s2 && t1 == t2
   TySum s1 t1 == TySum s2 t2 = s1 == s2 && t1 == t2
   TyRef t1 == TyRef t2 = t1 == t2
+  TyName nm1 tyvars1 == TyName nm2 tyvars2 =
+    nm1 == nm2 && tyvars1 == tyvars2
   TyVariant nm1 _ _ == TyVariant nm2 _ _ = nm1 == nm2
   TyVar _ x == TyVar _ y = x == y
   t1 == t2 = False
@@ -301,7 +306,10 @@ instance Show (Term α) where
     "(TmLet " ++ show x ++ " " ++ show tm1 ++ " " ++ show tm2 ++ ")"
   show (TmVariant _ x tm) =
     "(TmVariant " ++ show x ++ " " ++ show tm ++ ")"
-         
+  show (TmMatch _ discrim cases) =
+    "(TmMatch " ++ show discrim ++ " " ++
+    (intercalate " " (map show cases)) ++ ")" 
+        
 instance Show α => Show (Command α) where
   show (CDecl _ s t) = "(CDecl " ++ show s ++ " " ++ show t ++ ")"
   show (CLet _ s t)  = "(CLet " ++ show s ++ " " ++ show t ++ ")"
@@ -340,7 +348,7 @@ isComparisonBinop BAnd = True
 isComparisonBinop BOr  = True
 isComparisonBinop _    = False
 
-isBUpdate:: Binop -> Bool
+isBUpdate :: Binop -> Bool
 isBUpdate BUpdate = True
 isBUpdate _ = False
 
@@ -358,3 +366,50 @@ binopType BGe     = TyBool
 binopType BAnd    = TyBool
 binopType BOr     = TyBool
 binopType BUpdate = TyUnit
+
+data_of_term :: Term α -> α
+data_of_term t =
+  case t of
+    TmVar fi _          -> fi
+    TmAbs fi _ _ _      -> fi
+    TmApp fi _ _        -> fi
+    TmUnit fi           -> fi
+    TmBool fi _         -> fi
+    TmIf fi _ _ _       -> fi
+    TmInt fi _          -> fi
+    TmUnop fi _ _       -> fi
+    TmBinop fi _ _ _    -> fi
+    TmPair fi _ _       -> fi
+    TmInl fi _ _        -> fi
+    TmInr fi _ _        -> fi
+    TmCase fi _ _ _ _ _ -> fi
+    TmLet fi _ _ _      -> fi
+    TmVariant fi _ _    -> fi
+    TmMatch fi _ _      -> fi
+
+data_of_command :: Command α -> α
+data_of_command c =
+  case c of
+    CDecl fi _ _   -> fi
+    CLet fi _ _    -> fi
+    CEval fi _     -> fi
+    CCheck fi _    -> fi
+    CData fi _ _ _ -> fi
+
+term_of_command :: Command α -> Term α
+term_of_command c =
+  case c of
+    CLet _ _ t -> t
+    CEval _ t   -> t
+
+mkArrowType :: [Type] -> Type
+mkArrowType (x : []) = x
+mkArrowType (x : y : []) = TyArrow x y
+mkArrowType (x : y : ys) = TyArrow x $ mkArrowType $ y : ys
+
+-- Build a supercombinator with the given Ids (which may appear free
+-- in the given body).
+mkAbs :: [Id] -> Term α -> Term α
+mkAbs [] tm = tm
+mkAbs (x:xs) tm =
+  TmAbs (data_of_term tm) x (TyVar False (Id "")) $ mkAbs xs tm

@@ -104,6 +104,9 @@ tokens :-
   \▵                            { lex' TokenTriangle }
   \▿                            { lex' TokenTriangleDown }
   data                          { lex' TokenData }
+  destruct                      { lex' TokenDestruct }
+  as                            { lex' TokenAs }
+  end                           { lex' TokenEnd }
   -- eof                        { lex' TokenEOF }
   $capital [$alpha $digit \_ \']* { lex (TokenCapId . Id) }
   $alpha [$alpha $digit \_ \']*   { lex (TokenId . Id) }
@@ -198,6 +201,9 @@ data TokenClass =
   | TokenTriangle
   | TokenTriangleDown
   | TokenData
+  | TokenDestruct
+  | TokenAs
+  | TokenEnd
     deriving (Eq,Show)
 
 -- For nice parser error messages.
@@ -270,6 +276,9 @@ unLex TokenDoubleBar       = "∥"
 unLex TokenTriangle        = "▵"
 unLex TokenTriangleDown    = "▿"
 unLex TokenData            = "data"
+unLex TokenDestruct        = "destruct"
+unLex TokenAs              = "as"
+unLex TokenEnd             = "end"
 unLex TokenEOF             = "<EOF>"
 
 alexEOF :: Alex Token

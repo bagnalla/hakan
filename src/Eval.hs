@@ -10,6 +10,7 @@ module Eval (
 import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
+import Data.List (intercalate)
 
 import Ast
 import Symtab (Symtab, Id(..), empty, add, exists, fold)
@@ -27,17 +28,22 @@ data Value =
   | VInl Value
   | VInr Value
   | VLoc Id
+  | VVariant Id [Value]
   deriving Eq
 
 instance Show Value where
   show VUnit = "VUnit"
   show (VBool b) = "(VBool " ++ show b ++ ")"
   show (VInt i) = "(VInt " ++ show i ++ ")"
-  show (VClos env x t) = "(VClos " ++ show x ++ " " ++ show t ++ ")"
+  -- show (VClos env x t) = "(VClos " ++ show x ++ " " ++ show t ++ ")"
+  show (VClos env x t) = "(VClos (env = " ++ show env ++ ") " ++ show x ++
+    " " ++ show t ++ ")"
   show (VPair v1 v2) = "(VPair " ++ show v1 ++ " " ++ show v2 ++ ")"
   show (VInl v) = "(VInl " ++ show v ++ ")"
   show (VInr v) = "(VInr " ++ show v ++ ")"
   show (VLoc x) = "(VLoc " ++ show x ++ ")"
+  show (VVariant x vs) = "(VVariant " ++ show x ++ " " ++
+    intercalate " " (show <$> vs) ++ ")"
 
 instance Show Env where
   show =
@@ -61,7 +67,7 @@ evalError :: (MonadReader Env m, MonadState (b, Env) m) => String -> m a
 evalError s = do
   env <- ask
   (_, heap) <- get
-  error $ "environment:\n" ++ show env ++ "\n\n heap: " ++
+  error $ "runtime error!\nenvironment:\n" ++ show env ++ "\n\nheap: " ++
     show heap ++ "\n\n" ++ s
 
 
@@ -192,6 +198,12 @@ eval (TmCase _ discrim nm1 t1 nm2 t2) = do
 eval (TmLet _ x tm1 tm2) = do
   v1 <- eval tm1
   local (Env . add x v1 . unEnv) $ eval tm2
+
+eval (TmVariant _ x tms) = VVariant x <$> mapM eval tms
+
+-- Here we need to do the actual pattern matching work.. I suppose by
+-- generating let bindings to surround the case terms.
+eval (TmMatch _ discrim cases) = error "eval: TODO TmMatch"
 
 
 -- Extend an environment with a new binding. If the identifier is "_",

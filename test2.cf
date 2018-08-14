@@ -2,3 +2,37 @@
 data MyType a =
   | Foo
   | Bar ℤ
+  | Baz Bool ℤ
+
+# A datatype with no data constructors is allowed. It is uninhabited.
+data Empty =
+
+# val f : Empty -> a
+# val f : Bool -> a
+# let f = λx. destruct x as end
+
+val f : MyType a -> Bool
+let f = λx. destruct x as | Foo -> ⊥ end
+
+# let x = Baz ⊥ 123
+
+# 〚 x 〛
+
+# 〚
+#   destruct x as
+#   | Foo -> tt
+#   | Bar _ -> tt
+#   | Baz x y -> tt
+#   | _ -> tt
+#   end
+# 〛
+
+# let y = (x, (0, ⊤))
+
+# 〚
+#   destruct y as
+#   | (x, (z, ⊥)) -> ⊤
+#   | (_, (_, b)) -> b
+#   # | (0, _) -> ⊥
+#   end
+# 〛
