@@ -1,3 +1,11 @@
+
+data Pair a b =
+  | Pair a b
+
+data Sum a b =
+  | Inl a
+  | Inr b
+
 val nand : Bool → Bool → Bool
 let nand = λx. λy. ¬ (x ∧ y)
 
@@ -40,9 +48,9 @@ let pair_fun = λf. λg. λp. (f p₁, g p₂)
 # Function cotupling.
 val cotuple : (a → c) → (b → c) → a + b → c
 let cotuple = λf. λg. λs.
-  case s of
-  | inl x → f x
-  | inr y → g y
+  destruct s as
+  | Inl x → f x
+  | Inr y → g y
 
 val curry : (a × b → c) → a → b → c
 let curry = λf. λx. λy. f (x, y)
@@ -64,7 +72,3 @@ val fact : ℤ → ℤ
 letrec fact = λn.
   if n ≤ 0 then 1 else
   n * fact (n - 1)
-
-
-# misc
-

@@ -1,0 +1,28 @@
+val proj1 : a × b → a
+let proj1 = λp. p₁
+
+val f : ℤ → ℤ
+let f = λx. x + 5
+
+val g : ℤ → ℤ
+let g = λx. x * 2
+
+val x : ℤ × ℤ
+let x = (1, 2)
+
+val compose : (a → b) → (b → c) → a → c
+let compose = λf. λg. λx. g (f x)
+
+# val asdf : a × b → a
+# let asdf = λp. π₁ p
+
+# 〚 compose π₁ (compose f g) 〛
+# 〚 compose π₁ f 〛
+
+〚 let comp = λf. λg. λx. g (f x) in comp π₁ (comp f g) 〛
+# 〚 let comp = λf. λg. λx. g (f x) in comp π₁ (\f. \g. \x. g (f x)) 〛
+# 〚 let comp = λf. λg. λx. g (f x) in comp π₁ f 〛
+# 〚 let comp = (λf. λg. λx. g (f x)) in comp 〛
+# 〚 λf. λg. λx. g (f x) 〛
+
+# 〚 λf. λg. λx. g (f x)〛

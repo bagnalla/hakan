@@ -1,0 +1,11 @@
+
+data Sum a b =
+  | Inl a
+  | Inr b
+
+# Function cotupling.
+val cotuple : (a → c) → (b → c) → a + b → c
+let cotuple = λf. λg. λs.
+  destruct s as
+  | Inl x → f x
+  | Inr y → g y

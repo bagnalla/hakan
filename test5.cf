@@ -1,0 +1,9 @@
+
+data List a =
+  | Nil
+  | Cons a (List a)
+
+let x = Cons 0 Nil
+
+# data D a =
+#   | D a (D a)

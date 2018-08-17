@@ -19,6 +19,7 @@ mapFst = flip bimap id
 mapSnd :: (b -> c) -> (a, b) -> (a, c)
 mapSnd = bimap id
 
+-- Is there a cooler way to implement this?
 mapSndM :: Monad m => (b -> m c) -> m (a, b) -> m (a, c)
 mapSndM f x = do
   (y, z) <- x

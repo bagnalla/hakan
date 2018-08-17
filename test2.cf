@@ -2,7 +2,25 @@
 data MyType a =
   | Foo
   | Bar ℤ
-  | Baz Bool ℤ
+  | Baz Bool a
+
+data Sum a b =
+  | Inl a
+  | Inr b
+
+# data MyType a =
+#   | Foo : MyType a
+#   | Bar : ℤ -> MyType a
+#   | Baz : Bool -> a -> MyType a
+
+# data Sum a b =
+#   | inl : a -> Sum a b
+#   | inr : b -> Sum a b
+
+# data MyType = Λa.
+#   | Foo
+#   | Bar ℤ
+#   | Baz Bool ℤ
 
 # A datatype with no data constructors is allowed. It is uninhabited.
 data Empty =
@@ -11,10 +29,26 @@ data Empty =
 # val f : Bool -> a
 # let f = λx. destruct x as end
 
-val f : MyType a -> Bool
-let f = λx. destruct x as | Foo -> ⊥ end
+let iszero = λn. if n = 0 then ⊤ else ⊥
 
-# let x = Baz ⊥ 123
+val f : MyType Bool -> Bool
+let f = λx : MyType a. # this should probably produce a warning
+  destruct x as
+  | Foo -> ⊥
+  | Bar n -> iszero n
+  | Baz y z -> z
+
+〚 f (Baz ⊥ ⊤) 〛
+〚 f (Bar 1) 〛
+〚 f Foo 〛
+
+# val a : Bool
+# let a = ⊥
+
+# val b : Unit
+# let b = tt
+
+# let x = Baz a 123
 
 # 〚 x 〛
 

@@ -16,13 +16,22 @@ let odd = λx. ¬ even x
 
 let intToBool = λx. if x = 0 then ⊥ else ⊤
 
-let x1 = inl 0 : ℤ + Bool
-let x2 = inr ⊥ : ℤ + Bool
+# let x1 = inl 0 : ℤ + Bool
+# let x2 = inr ⊥ : ℤ + Bool
 
-val x3 : ℤ + Bool -> Bool
-let x3 = case x1 of
-     | inl x → intToBool x
-     | inr y → y
+let x1 = Inl 0
+let x2 = Inr ⊥
+
+# val x3 : ℤ + Bool -> Bool
+# let x3 = case x1 of
+#      | inl x → intToBool x
+#      | inr y → y
+
+val x3 : Sum ℤ Bool -> Bool
+let x3 = λx.
+  destruct x1 as
+  | Inl x → intToBool x
+  | Inr y → y
 
 let counter = ref -1
 
@@ -54,7 +63,6 @@ letrec triangle = λn. if n = 0 then 0 else n + triangle (n - 1)
 let f = λx. x + 5
 let g = λx. x * 2
 val h : ℤ × ℤ → ℤ × ℤ
-# let h = ⟨f ∘ π₁, g ∘ π₂⟩
 let h = ⟨f ∘ π₁, g ∘ π₂⟩
 〚 h (1, 2) 〛# ==> (6, 4)
 
@@ -62,6 +70,7 @@ let h = ⟨f ∘ π₁, g ∘ π₂⟩
 # 〚 (f ∘ π₁) x 〛
 # 〚 let comp = (λf. λg. λx. g (f x)) in comp π₁ f x 〛
 # 〚 compose f π₁ 〛
+# 〚 compose π₁ f 〛
 
 
 # There was a bug in the typechecker. It let the following program

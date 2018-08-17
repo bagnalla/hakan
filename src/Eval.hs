@@ -25,22 +25,20 @@ data Value =
   | VInt Integer
   | VClos Env Id (Term ())
   | VPair Value Value
-  | VInl Value
-  | VInr Value
   | VLoc Id
   | VVariant Id [Value]
   deriving Eq
 
+-- TODO: fix printing of closure environments in the presence of
+-- recursive (infinite) types.
 instance Show Value where
   show VUnit = "VUnit"
   show (VBool b) = "(VBool " ++ show b ++ ")"
   show (VInt i) = "(VInt " ++ show i ++ ")"
-  -- show (VClos env x t) = "(VClos " ++ show x ++ " " ++ show t ++ ")"
-  show (VClos env x t) = "(VClos (env = " ++ show env ++ ") " ++ show x ++
-    " " ++ show t ++ ")"
+  show (VClos env x t) = "(VClos " ++ show x ++ " " ++ show t ++ ")"
+  -- show (VClos env x t) = "(VClos (env = " ++ show env ++ ") " ++ show x ++
+  --   " " ++ show t ++ ")"
   show (VPair v1 v2) = "(VPair " ++ show v1 ++ " " ++ show v2 ++ ")"
-  show (VInl v) = "(VInl " ++ show v ++ ")"
-  show (VInr v) = "(VInr " ++ show v ++ ")"
   show (VLoc x) = "(VLoc " ++ show x ++ ")"
   show (VVariant x vs) = "(VVariant " ++ show x ++ " " ++
     intercalate " " (show <$> vs) ++ ")"
@@ -184,26 +182,44 @@ eval (TmPair _ t1 t2) = do
   v2 <- eval t2
   return $ VPair v1 v2
 
-eval (TmInl _ tm _) = VInl <$> eval tm
-eval (TmInr _ tm _) = VInr <$> eval tm
-
-eval (TmCase _ discrim nm1 t1 nm2 t2) = do
-  v <- eval discrim
-  case v of
-    VInl x -> local (extendEnv nm1 x) $ eval t1
-    VInr x -> local (extendEnv nm2 x) $ eval t2
-    _ -> evalError $ "eval: " ++ show v ++
-         " isn't a left or right injection"
-
 eval (TmLet _ x tm1 tm2) = do
   v1 <- eval tm1
   local (Env . add x v1 . unEnv) $ eval tm2
 
 eval (TmVariant _ x tms) = VVariant x <$> mapM eval tms
 
--- Here we need to do the actual pattern matching work.. I suppose by
--- generating let bindings to surround the case terms.
-eval (TmMatch _ discrim cases) = error "eval: TODO TmMatch"
+-- Here we do the actual pattern matching work (extending environment
+-- with bindings from the pattern match).
+eval (TmMatch _ discrim cases) =
+  eval discrim >>= go cases
+  where
+    go ((p, tm) : cs) v = do
+      env <- ask
+      case bindPattern p v env of
+        Just e -> local (const e) $ eval tm
+        -- If the pattern failed to match, try the next one.
+        Nothing -> go cs v
+    go [] _ = evalError "eval: failed to match any pattern"
+
+
+-- Given a pattern, a value to match against the pattern, and an
+-- initial environment, produce an extended environment with bindings
+-- produced by the pattern match. If it fails to match, return
+-- Nothing.
+bindPattern :: Pattern -> Value -> Env -> Maybe Env
+bindPattern (PVar x) v = Just . extendEnv x v
+bindPattern PUnit VUnit = Just . id
+bindPattern (PBool True) (VBool True) = Just . id
+bindPattern (PBool False) (VBool False) = Just . id
+bindPattern (PInt n) (VInt m) =
+  if n == m then Just . id else const Nothing
+bindPattern (PPair p1 p2) (VPair v1 v2) =
+  bindPattern p1 v2 >=> bindPattern p2 v2
+bindPattern (PConstructor x ps) (VVariant y vs) =
+  if x == y then
+    \e -> foldM (\acc (p, v) -> bindPattern p v acc) e $ zip ps vs
+  else const Nothing
+bindPattern _ _ = const Nothing
 
 
 -- Extend an environment with a new binding. If the identifier is "_",

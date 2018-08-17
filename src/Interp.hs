@@ -39,7 +39,7 @@ interpCommands (CData _ nm _ ctors : cs) = do
     mapM (\(x, tys) -> do
              let ids = map (Symtab.Id . (:[])) $
                        take (length tys) ['a'..]
-             val <- eval $ mkAbs ids (TmVariant () nm $ map (TmVar ()) ids)
+             val <- eval $ mkAbs ids (TmVariant () x $ map (TmVar ()) ids)
              return $ (x, val)) ctors
   local (\(Env e) -> Env $ foldl (\acc (x, f) -> add x f acc) e funs) $
     interpCommands cs

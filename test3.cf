@@ -1,0 +1,18 @@
+
+data Sum a b =
+  | Inl a
+  | Inr b
+
+let x1 = Inl 0
+let x2 = Inr ⊥
+let x3 = Inl ⊤
+
+val f : Sum ℤ Bool -> Bool
+let f = λx.
+  destruct x as
+  | Inl x → ⊤
+  | Inr y → y
+
+〚 f x1 〛
+〚 f x2 〛
+# 〚 f x3 〛

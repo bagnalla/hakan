@@ -105,7 +105,7 @@ import Ast (data_of_term)
 %left '*' '/' '×' '⊗'
 %left '∘'
 %left '▵' '▿'
-%nonassoc fix true false intVal id
+%nonassoc fix true false intVal id unit bool int
 %left APP
 %nonassoc UNOP
 %nonassoc '-'
@@ -126,39 +126,43 @@ AType :
   | bool { Ast.TyBool }
   | int { Ast.TyInt }
   | '(' Type ')' { $2 }
---  | capid list(id) { Ast.TyName (idFromToken $1) (map idFromToken $2) }
-  | capid Idlist { Ast.TyName (idFromToken $1) $2 }
+  | id { Ast.TyVar False $ idFromToken $1 }
+  | capid { Ast.TyName (idFromToken $1) }
 
--- TODO: this is pointless I think. Just use list(id).
-Idlist :
-  id Idlist { idFromToken $1 : $2 }
-  | { [] }
+AppType :
+  AType { $1 }
+  | AppType AType { Ast.TyApp $1 $2 }
 
--- Atomic types including type variables
-VType :
+Type :
+  AppType { $1 }
+  | Type arrow Type { Ast.TyArrow $1 $3 }
+  | Type '×' Type { Ast.TyPair $1 $3 }
+  | Type '+' Type
+    { Ast.TyApp (Ast.TyApp (Ast.TyName $ Id "Sum") $1) $3 }
+
+-- The only reason we duplicate the grammar for types is so that type
+-- variables in a type declaration are marked as rigid. There is probably
+-- a better way to do this, either here in the parser or just by marking
+-- them as rigid after the fact in the typechecker.
+
+DeclAType :
   unit { Ast.TyUnit }
   | bool { Ast.TyBool }
   | int { Ast.TyInt }
   | '(' DeclType ')' { $2 }
   | id { Ast.TyVar True $ idFromToken $1 }
---  | capid list(id) { Ast.TyName (idFromToken $1) (map idFromToken $2) }
-  | capid Idlist { Ast.TyName (idFromToken $1) $2 }
+  | capid { Ast.TyName (idFromToken $1) }
 
---AppType :
---  AType { $1 }
---  | AppType AType { Ast.TmApp (data_of_term $1) $1 $2 }
-
-Type :
-  AType { $1 }
-  | Type arrow Type { Ast.TyArrow $1 $3 }
-  | Type '×' Type { Ast.TyPair $1 $3 }
-  | Type '+' Type { Ast.TySum $1 $3 }
+DeclAppType :
+  DeclAType { $1 }
+  | DeclAppType DeclAType { Ast.TyApp $1 $2 }
 
 DeclType :
-  VType { $1 }
+  DeclAppType { $1 }
   | DeclType arrow DeclType { Ast.TyArrow $1 $3 }
   | DeclType '×' DeclType { Ast.TyPair $1 $3 }
-  | DeclType '+' DeclType { Ast.TySum $1 $3 }
+  | DeclType '+' DeclType
+    { Ast.TyApp (Ast.TyApp (Ast.TyName $ Id "Sum") $1) $3 }
 
 Id :
   '_' { Token $1 (TokenId (Id "_")) }
@@ -190,24 +194,19 @@ Term :
   | Term ":=" Term { Ast.TmBinop $2 Ast.BUpdate $1 $3 }
   | Term '∘' Term
     { Ast.TmApp $2 (Ast.TmApp $2  (Ast.TmVar $2 (Id "compose")) $3) $1 }
-  | case Term of '|' inl id arrow Term '|' inr id arrow Term
-    { case ($6, $11) of
-	(Token _ (TokenId nm1), Token _ (TokenId nm2)) ->
-	  Ast.TmCase $1 $2 nm1 $8 nm2 $13 }
   | Term ';' Term { Ast.TmApp $2 (Ast.TmAbs $2 (Id "_") Ast.TyUnit $3) $1 }
   | let id '=' Term in Term { Ast.TmLet $1 (idFromToken $2) $4 $6 }
   | Term '▿' Term
     { Ast.TmApp $2 (Ast.TmApp $2 (Ast.TmVar $2 (Id "cotuple")) $1) $3 }
   | Term '▵' Term
     { Ast.TmApp $2 (Ast.TmApp $2 (Ast.TmVar $2 (Id "tuple")) $1) $3 }
-  | destruct Term as barlist(Case) end { Ast.TmMatch $1 $2 $4 }
+--  | destruct Term as barlist(Case) end { Ast.TmMatch $1 $2 $4 }
+  | destruct Term as barlist(Case) { Ast.TmMatch $1 $2 $4 }
 
 AppTerm :
   ATerm { $1 }
   | AppTerm ATerm { Ast.TmApp (data_of_term $1) $1 $2 }
   | fix ATerm { Ast.TmUnop $1 Ast.UFix $2 }
-  | inl ATerm TyBinder { Ast.TmInl $1 $2 $3 }
-  | inr ATerm TyBinder { Ast.TmInr $1 $2 $3 }
 
 -- Atomic terms
 ATerm :
@@ -252,8 +251,12 @@ barlist(p) :
   '|' p barlist(p) { $2 : $3 }
   | { [] }
 
+-- Here we parse the constructor types as a single big type application
+-- and use deApp to turn it into a list of types.
 Ctor :
-  capid list(Type) { (idFromToken $1, $2) }
+  capid opt(Type) { (idFromToken $1, case $2 of
+                                       Just ty -> deApp ty
+                                       Nothing -> []) }
 
 Command :
   val id TyDeclBinder { Ast.CDecl (infoFromToken $2) (idFromToken $2) $3 }
@@ -307,4 +310,9 @@ intFromToken tok = case tok of
 infoFromToken :: Token -> AlexPosn
 infoFromToken tok = case tok of
   Token fi _ -> fi
+
+-- This is such a hack.
+deApp :: Ast.Type -> [Ast.Type]
+deApp (Ast.TyApp s t) = deApp s ++ [t]
+deApp ty = [ty]
 }

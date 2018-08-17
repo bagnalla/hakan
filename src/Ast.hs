@@ -4,8 +4,6 @@
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE FlexibleContexts #-}
 
-{-# LANGUAGE EmptyCase #-}
-
 -- | This module defines the internal language syntax.
 
 -- Maybe we should make everything implicitly recursive (always
@@ -20,8 +18,6 @@
 -- representation during compilation.
 
 -- TODO:
--- 1) add algebraic datatypes (probably using functor fixpoint stuff)
--- and remove sums.
 -- 2) make a somewhat proper module system, probably like the modula
 -- based one described in the ZINC report.
 -- 3) char, string, and float types.
@@ -30,16 +26,36 @@
 -- up a "numeric" typeclass.. but maybe not since this is probably a
 -- ways off.
 
+-- Terms (maybe just abstractions?) will be marked as either pure or
+-- impure. Pure is the default, but they may be marked as impure by
+-- the programmer in the type declaration. It would be possible to
+-- infer impurity of course, but we want the use of impurity to be as
+-- explicit as possible. An impure term is able to use mutable
+-- references and other impure terms. There will be some intrinsic
+-- impure functions for I/O and things like that. The 'main' function
+-- of a program can be impure. This is basically a conceptually
+-- simpler (I think) alternative to the IO monad.
+
+-- There is also the question of whether to add full-blown typeclasses
+-- or just intrinsic support for certain concepts like functors and
+-- monads.
+
+-- We could probably remove the built in pairs as well, not just sums,
+-- and implement them as a variant type in the prelude but keep the
+-- syntactic sugar. That way if we have a mechanism for automatically
+-- deriving fmap and stuff for ADTs we can get them for pairs through
+-- that.
 
 module Ast (
-  Command(..), Prog(..), Term(..), Type(..), TypeScheme(..), Unop(..),
-  Binop(..), mkTypeScheme, eraseData, isArithBinop, isComparisonBinop,
-  isBUpdate, binopType, isValue, typeRec, typeRec2, termRec, termTypeRec,
-  mkArrowType, mkAbs, data_of_term, data_of_command, Pattern(..), typeRecM
+  Command(..), Prog(..), Term(..), Type(..), Unop(..), Binop(..),
+  eraseData, isArithBinop, isComparisonBinop, isBUpdate, binopType,
+  isValue, typeRec, typeRec2, termRec, termTypeRec, mkArrowType,
+  data_of_term, data_of_command, Pattern(..), typeRecM, Kind(..), mkAbs,
+  termTypeRecM, commandTypeRecM, typeRec2_d
   ) where
 
 import Data.List (intercalate)
-import Data.Semigroup
+import Data.Monoid
 import GHC.Generics (Generic)
 import Generic.Random.Generic
 
@@ -50,71 +66,101 @@ import Util
 
 
 ----------
+-- | Kinds
+
+data Kind =
+  KStar
+  | KArrow Kind Kind
+  deriving (Eq, Generic, Show)
+
+-- A recursion scheme for kinds.
+kindRec :: (Kind -> Kind) -> Kind -> Kind
+kindRec f KStar = f KStar
+kindRec f (KArrow k1 k2) = f $ KArrow (kindRec f k1) (kindRec f k2)
+
+instance Arbitrary Kind where
+  arbitrary = genericArbitrary' Z uniform
+  shrink (KArrow s t) = [s, t]
+  shrink _ = []
+
+----------
 -- | Types
 
 data Type =
-  TyUnit
+  TyVar Bool Id
+  | TyAbs Id Kind Type
+  | TyApp Type Type
+  | TyUnit
   | TyBool
   | TyInt
   | TyArrow Type Type
-  | TyVar Bool Id
   | TyPair Type Type
-  | TySum Type Type
   | TyRef Type
-  | TyName Id [Id]
-  | TyVariant Id [Id] [(Id, [Type])]
+  | TyName Id
+  | TyVariant Id [Type] [(Id, [Type])]
   deriving Generic
 
 -- A recursion scheme for types.
 typeRec :: (Type -> Type) -> Type -> Type
+typeRec f (TyAbs x k s) = f $ TyAbs x k (typeRec f s)
+typeRec f (TyApp s t)   = f $ TyApp (typeRec f s) (typeRec f t)
 typeRec f (TyArrow s t) = f $ TyArrow (typeRec f s) (typeRec f t)
 typeRec f (TyPair s t)  = f $ TyPair (typeRec f s) (typeRec f t)
-typeRec f (TySum s t)   = f $ TySum (typeRec f s) (typeRec f t)
 typeRec f (TyRef s)     = f $ TyRef $ typeRec f s
-typeRec f (TyVariant nm tyvars ctors) =
-  f $ TyVariant nm tyvars $ map (mapSnd $ map $ typeRec f) ctors
-typeRec f ty            = f ty
+typeRec f (TyVariant nm tyargs ctors) =
+  f $ TyVariant nm (map (typeRec f) tyargs) $
+  map (mapSnd $ map $ typeRec f) ctors
+typeRec f ty = f ty
 
 -- A monadic recursion scheme for types.
 typeRecM :: Monad m => (Type -> m Type) -> Type -> m Type
+typeRecM f (TyAbs x k s) =
+  TyAbs x k <$> typeRecM f s >>= f
+typeRecM f (TyApp s t) =
+  pure TyApp <*> typeRecM f s <*> typeRecM f t >>= f
 typeRecM f (TyArrow s t) =
   pure TyArrow <*> typeRecM f s <*> typeRecM f t >>= f
 typeRecM f (TyPair s t) =
   pure TyPair <*> typeRecM f s <*> typeRecM f t >>= f
-typeRecM f (TySum s t) =
-  pure TySum <*> typeRecM f s <*> typeRecM f t >>= f
 typeRecM f (TyRef s) = TyRef <$> typeRecM f s >>= f
-typeRecM f (TyVariant nm tyvars ctors) =
-  TyVariant nm tyvars <$> mapM (mapSndM $ mapM (typeRecM f))
-  (return <$> ctors) >>= f
+typeRecM f (TyVariant nm tyargs ctors) =
+  pure (TyVariant nm) <*> mapM (typeRecM f) tyargs <*>
+  mapM (mapSndM $ mapM (typeRecM f)) (return <$> ctors) >>= f
 typeRecM f ty = f ty
 
--- Another recursion scheme for types, given that the output type is a
--- semigroup (can be built up using an associative operation). Used
--- for example in the 'freeTyVarsAux' function in Core.hs.
-typeRec2 :: Semigroup a => (Type -> a) -> Type -> a
+-- A sort of catamorphism for types (folding over a type to produce a
+-- value), given that the output type is a monoid. Used for example in
+-- the 'freeTyVarsAux' function in Core.hs.  Currently a "preorder"
+-- traversal, for no reason really. I suppose we could define multiple
+-- versions for the different traversal orders.
+typeRec2 :: Monoid a => (Type -> a) -> Type -> a
+typeRec2 f ty@(TyAbs _ _ s) = f ty <> typeRec2 f s
+typeRec2 f ty@(TyApp s t)   = f ty <> typeRec2 f s <> typeRec2 f t
 typeRec2 f ty@(TyArrow s t) = f ty <> typeRec2 f s <> typeRec2 f t
 typeRec2 f ty@(TyPair s t)  = f ty <> typeRec2 f s <> typeRec2 f t
-typeRec2 f ty@(TySum s t)   = f ty <> typeRec2 f s <> typeRec2 f t
 typeRec2 f ty@(TyRef s)     = f ty <> typeRec2 f s
--- typeRec2 f ty@(TyVariant nm tyvars ctors) = error "typeRec2 TODO"
-typeRec2 f ty               = f ty
+typeRec2 f ty@(TyVariant _ tyargs ctors) =
+  f ty <> (foldl (<>) mempty $ map (typeRec2 f) tyargs) <>
+  (foldl (<>) mempty $ map (typeRec2 f) $ concat $ snd $ unzip ctors)
+typeRec2 f ty = f ty
+
+-- A depth-bounded version of typeRec2.
+typeRec2_d :: Monoid a => Int -> (Type -> a) -> Type -> a
+typeRec2_d d f ty@(TyAbs _ _ s) = f ty <> typeRec2_d (d-1) f s
+typeRec2_d d f ty | d <= 0 = f ty
+typeRec2_d d f ty@(TyApp s t) =
+  f ty <> typeRec2_d (d-1) f s <> typeRec2_d (d-1) f t
+typeRec2_d d f ty@(TyArrow s t) =
+  f ty <> typeRec2_d (d-1) f s <> typeRec2_d (d-1) f t
+typeRec2_d d f ty@(TyPair s t) =
+  f ty <> typeRec2_d (d-1) f s <> typeRec2_d (d-1) f t
+typeRec2_d d f ty@(TyRef s) = f ty <> typeRec2_d (d-1) f s
+typeRec2_d d f ty@(TyVariant _ tyargs ctors) =
+  f ty <> (foldl (<>) mempty $ map (typeRec2_d (d-1) f) tyargs) <>
+  (foldl (<>) mempty $ map (typeRec2_d (d-1) f) $ concat $ snd $ unzip ctors)
+typeRec2_d _ f ty = f ty
 
 
--- Type schemes. A type scheme is a type together with a list of its
--- free type variables. The typechecker computes type schemes for
--- every term, although most have no type variables except for
--- let-bound abstractions (but only when they are syntactically values
--- due to the value restriction).
-data TypeScheme =
-  TypeScheme { ts_tyvars_of :: [Id],
-               ts_ty_of     :: Type }
-  deriving (Show, Eq)
-
-mkTypeScheme :: [Id] -> Type -> TypeScheme
-mkTypeScheme ids ty =
-  TypeScheme { ts_tyvars_of = ids,
-               ts_ty_of     = ty }
 
 data Unop =
   UMinus
@@ -160,9 +206,6 @@ data Term α =
   | TmUnop α Unop (Term α)
   | TmBinop α Binop (Term α) (Term α)
   | TmPair α (Term α) (Term α)
-  | TmInl α (Term α) Type
-  | TmInr α (Term α) Type
-  | TmCase α (Term α) Id (Term α) Id (Term α)
   | TmLet α Id (Term α) (Term α)
   | TmVariant α Id [Term α]
   | TmMatch α (Term α) [(Pattern, Term α)]
@@ -188,10 +231,6 @@ termRec f (TmBinop fi b tm1 tm2) =
   f $ TmBinop fi b (termRec f tm1) (termRec f tm2)
 termRec f (TmPair fi tm1 tm2) =
   f $ TmPair fi (termRec f tm1) (termRec f tm2)
-termRec f (TmInl fi tm ty) = f $ TmInl fi (termRec f tm) ty
-termRec f (TmInr fi tm ty) = f $ TmInr fi (termRec f tm) ty
-termRec f (TmCase fi tm1 x tm2 y tm3) =
-  f $ TmCase fi (termRec f tm1) x (termRec f tm2) y (termRec f tm3)
 termRec f (TmLet fi x tm1 tm2) =
   f $ TmLet fi x (termRec f tm1) (termRec f tm2)
 termRec f (TmVariant fi x tms) =
@@ -200,14 +239,38 @@ termRec f (TmMatch fi discrim cases) =
   f $ TmMatch fi (termRec f discrim) $ mapSnd (termRec f) <$> cases
 termRec f tm = f tm
 
+termRecM :: Monad m => (Term α -> m (Term α)) -> Term α -> m (Term α)
+termRecM f (TmAbs fi x ty tm) = TmAbs fi x ty <$> termRecM f tm >>= f
+termRecM f (TmIf fi tm1 tm2 tm3) =
+  pure (TmIf fi) <*> termRecM f tm1 <*> termRecM f tm2 <*> termRecM f tm3
+  >>= f
+termRecM f (TmUnop fi u tm) = TmUnop fi u <$> termRecM f tm >>= f
+termRecM f (TmBinop fi b tm1 tm2) =
+  pure (TmBinop fi b) <*> termRecM f tm1 <*> termRecM f tm2 >>= f
+termRecM f (TmPair fi tm1 tm2) =
+  pure (TmPair fi) <*> termRecM f tm1 <*> termRecM f tm2 >>= f
+termRecM f (TmLet fi x tm1 tm2) =
+  pure (TmLet fi x) <*> termRecM f tm1 <*> termRecM f tm2 >>= f
+termRecM f (TmVariant fi x tms) =
+  TmVariant fi x <$> mapM (termRecM f) tms >>= f
+termRecM f (TmMatch fi discrim cases) =
+  pure (TmMatch fi) <*> termRecM f discrim <*>
+  (uncurry zip <$> mapSndM (mapM $ termRecM f) (return $ unzip cases))
+  >>= f
+termRecM f tm = f tm
+
 -- Map a type transformer over a term.
 termTypeRec :: (Type -> Type) -> Term α -> Term α
 termTypeRec f = termRec $
   \tm -> case tm of
            TmAbs fi x ty tm -> TmAbs fi x (f ty) tm
-           TmInl fi tm ty -> TmInl fi tm (f ty)
-           TmInr fi tm ty -> TmInr fi tm (f ty)
            _ -> tm
+
+termTypeRecM :: Monad m => (Type -> m Type) -> Term α -> m (Term α)
+termTypeRecM f = termRecM $
+  \tm -> case tm of
+           TmAbs fi x ty tm -> pure (TmAbs fi x) <*> f ty <*> pure tm
+           _ -> return tm
 
 
 -------------
@@ -220,6 +283,23 @@ data Command α =
   | CCheck α (Term α)
   | CData α Id [Id] [(Id, [Type])]
   deriving (Functor, Generic)
+
+
+commandTermRecM :: Monad m => (Term α -> m (Term α)) ->
+                   Command α -> m (Command α)
+commandTermRecM f (CLet fi x tm) = CLet fi x <$> f tm
+commandTermRecM f (CEval fi tm) = CEval fi <$> f tm
+commandTermRecM f (CCheck fi tm) = CCheck fi <$> f tm
+commandTermRecM _ com = return com
+
+commandTypeRecM :: Monad m => (Type -> m Type) -> Command α -> m (Command α)
+commandTypeRecM f (CDecl fi x ty) = CDecl fi x <$> f ty
+commandTypeRecM f (CLet fi x tm) = CLet fi x <$> termTypeRecM f tm
+commandTypeRecM f (CEval fi tm) = CEval fi <$> termTypeRecM f tm
+commandTypeRecM f (CCheck fi tm) = CCheck fi <$> termTypeRecM f tm
+commandTypeRecM f (CData fi nm tyvars ctors) =
+  CData fi nm tyvars <$> uncurry zip <$>
+  mapSndM (mapM (mapM f)) (return $ unzip ctors)
 
 
 ------------
@@ -242,38 +322,51 @@ eraseData = fmap $ const ()
 -- | Typeclass Instances
 
 instance Show Type where
-  show TyUnit = "Unit"
-  show TyBool = "Bool"
-  show TyInt  = "Int"
-  show (TyArrow t1 t2) = "(" ++ show t1 ++ "->" ++ show t2 ++ ")"
-  show (TyVar _ (Id s)) = "(TyVar " ++ s ++ ")"
-  show (TyPair t1 t2) = "(" ++ show t1 ++ " * " ++ show t2 ++ ")"
-  show (TySum t1 t2) = "(" ++ show t1 ++ " + " ++ show t2 ++ ")"
-  show (TyRef ty) = "(TyRef " ++ show ty ++ ")"
-  show (TyName nm tyvars) =
-    "(TyName " ++ show nm ++ " " ++ show tyvars ++ ")"
-  show (TyVariant nm tyvars ctors) = "(TyVariant " ++ show nm ++ " "
-    ++ show tyvars ++ " " ++ show ctors ++ ")"
+  show = showType []
+
+showType :: [Id] -> Type -> String
+showType nms (TyVar b (Id s)) = "(TyVar " ++ show b ++ " " ++ s ++ ")"
+showType nms (TyAbs x k s) = "(TyAbs " ++ show x ++ " " ++ show k ++
+                             " " ++ showType nms s ++ ")"
+showType nms (TyApp s t) =
+  "(TyApp " ++ showType nms s ++ " " ++ showType nms t ++ ")"
+showType nms TyUnit = "Unit"
+showType nms TyBool = "Bool"
+showType nms TyInt  = "Int"
+showType nms (TyArrow t1 t2) =
+  "(" ++ showType nms t1 ++ " -> " ++ showType nms t2 ++ ")"
+showType nms (TyPair t1 t2) =
+  "(" ++ showType nms t1 ++ " * " ++ showType nms t2 ++ ")"
+showType nms (TyRef ty) = "(TyRef " ++ showType nms ty ++ ")"
+showType nms (TyName nm) = "(TyName " ++ show nm ++ ")"
+showType nms (TyVariant nm tyargs ctors) =
+  if nm `elem` nms then "(TyVariant " ++ show nm ++ ")" else
+    "(TyVariant " ++ show nm ++ " (" ++
+    intercalate " " (map (showType (nm : nms)) tyargs) ++ ") (" ++
+    intercalate " " (map (\(x, tys) ->
+                            "(" ++ show x ++ " : " ++ intercalate " "
+                           (map (showType (nm : nms)) tys) ++ ")")
+                     ctors) ++ "))"
 
 instance Eq Type where
+  TyVar _ x == TyVar _ y = x == y
+  TyAbs x k1 s == TyAbs y k2 t = x == y && k1 == k2 && s == t
+  TyApp s1 t1 == TyApp s2 t2 = s1 == s2 && t1 == t2
   TyUnit == TyUnit = True
   TyBool == TyBool = True
   TyInt == TyInt = True
   TyArrow s1 t1 == TyArrow s2 t2 = s1 == s2 && t1 == t2
   TyPair s1 t1 == TyPair s2 t2 = s1 == s2 && t1 == t2
-  TySum s1 t1 == TySum s2 t2 = s1 == s2 && t1 == t2
   TyRef t1 == TyRef t2 = t1 == t2
-  TyName nm1 tyvars1 == TyName nm2 tyvars2 =
-    nm1 == nm2 && tyvars1 == tyvars2
-  TyVariant nm1 _ _ == TyVariant nm2 _ _ = nm1 == nm2
-  TyVar _ x == TyVar _ y = x == y
-  t1 == t2 = False
+  TyName nm1 == TyName nm2 = nm1 == nm2
+  TyVariant nm1 tyargs1 ctors1 == TyVariant nm2 tyargs2 ctors2 =
+    nm1 == nm2 && tyargs1 == tyargs2 && ctors1 == ctors2
+  _ == _ = False
 
 instance Arbitrary Type where
   arbitrary = genericArbitrary' Z uniform
   shrink (TyArrow s t) = [s, t]
   shrink (TyPair s t) = [s, t]
-  shrink (TySum s t) = [s, t]
   shrink (TyRef s) = [s]
   shrink (TyVariant _ _ ctors) =
     concat $ concat $ shrink $ snd $ unzip ctors
@@ -297,11 +390,6 @@ instance Show (Term α) where
   show (TmUnop _ u t)   = "(TmUnop " ++ show u ++ " " ++ show t ++ ")"
   show (TmUnit _)       = "tt"
   show (TmPair _ t1 t2) = "(TmPair " ++ show t1 ++ " " ++ show t2 ++ ")"
-  show (TmInl _ tm ty)  = "(TmInl " ++ show tm ++ " " ++ show ty ++ ")"
-  show (TmInr _ tm ty)  = "(TmInr " ++ show tm ++ " " ++ show ty ++ ")"
-  show (TmCase _ discrim nm1 t1 nm2 t2) =
-    "(TmCase " ++ show discrim ++ " " ++ show nm1 ++ " " ++ show t1 ++
-    " " ++ show nm2 ++ " " ++ show t2 ++ ")"
   show (TmLet _ x tm1 tm2) =
     "(TmLet " ++ show x ++ " " ++ show tm1 ++ " " ++ show tm2 ++ ")"
   show (TmVariant _ x tm) =
@@ -331,8 +419,6 @@ isValue (TmUnit _) = True
 isValue (TmBool _ _) = True
 isValue (TmInt _ _) = True
 isValue (TmPair _ t1 t2) = isValue t1 && isValue t2
-isValue (TmInl _ tm _) = isValue tm
-isValue (TmInr _ tm _) = isValue tm
 isValue (TmVariant _ _ tms) = and (map isValue tms)
 isValue _ = False
 
@@ -380,9 +466,6 @@ data_of_term t =
     TmUnop fi _ _       -> fi
     TmBinop fi _ _ _    -> fi
     TmPair fi _ _       -> fi
-    TmInl fi _ _        -> fi
-    TmInr fi _ _        -> fi
-    TmCase fi _ _ _ _ _ -> fi
     TmLet fi _ _ _      -> fi
     TmVariant fi _ _    -> fi
     TmMatch fi _ _      -> fi

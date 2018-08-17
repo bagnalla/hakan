@@ -13,20 +13,21 @@ module Core (
   tysubstAll,
   idOfType,
   isTyVar,
-  fixTy
+  fixTy,
+  normalize,
+  kindCheck
   ) where
 
-import Control.Applicative (liftA2)
+-- import Control.Applicative (liftA2)
 import Control.Monad.State
 import Data.Bifunctor
 import Data.List (nub)
 import qualified Data.Traversable as T
--- import System.IO.Unsafe
 
 import Ast
 import Gensym (nextSym)
-import Symtab (Id(..), Symtab(..), map)
-
+import Symtab (Id(..), Symtab, map)
+import Util (debugPrint)
 
 ----------------
 -- | Unification
@@ -42,6 +43,7 @@ unify [] = Right []
 
 -- Rigid type variables refuse to change.
 unify ((s, t) : xs) =
+  -- debugPrint "unify" $
   if s == t then
     unify xs
   else if isTyVar s && (not $ isRigid s) &&
@@ -64,42 +66,13 @@ unify ((s, t) : xs) =
       unify $ (s', t') : xs
   else if isVariantTy s && isVariantTy t &&
           idOfTy s == idOfTy t then
-    let s' = tysOfTy s
-        t' = tysOfTy t in
+    debugPrint "unify variant" $
+    let s' = tyargsOfTy s
+        t' = tyargsOfTy t in
       unify $ zip s' t' ++ xs
   else
     -- Failed to unify s and t
     Left (s, t)
-
--- -- Rigid type variables refuse to change.
--- unify ((s, t) : xs) =
---   if s == t then
---     unify xs
---   else if isTyVar s && (not $ isRigid s) &&
---           (not $ s `elem` freetyvars t) then
---     seq (unsafePerformIO $ putStrLn $ show xs) $
---     seq (unsafePerformIO $ putStrLn $ show (t, s)) $
---     seq (unsafePerformIO $ putStrLn $ show $ tysubst t s xs) $ do
---     rest <- unify $ tysubst t s xs
---     return $ (t, s) : rest
---   else if isTyVar t && (not $ isRigid t) &&
---           (not $ t `elem` freetyvars s) then
---     seq (unsafePerformIO $ putStrLn $ show xs) $
---     seq (unsafePerformIO $ putStrLn $ show (s, t)) $
---     seq (unsafePerformIO $ putStrLn $ show $ tysubst s t xs) $ do
---       rest <- unify $ tysubst s t xs
---       return $ (s, t) : rest
---   else if isBiType s && isBiType t then
---     let (s1, s2) = pairOfType s
---         (t1, t2) = pairOfType t in
---       unify $ (s1, t1) : (s2, t2) : xs
---   else if isTyRef s && isTyRef t then
---     let s' = tyOfRefType s
---         t' = tyOfRefType t in
---       unify $ (s', t') : xs
---   else
---     -- Failed to unify s and t
---     Left (s, t)
 
 
 -------------------------------
@@ -122,16 +95,9 @@ instance (Bifunctor f, TySubstable a, TySubstable b) =>
 
 -- Substitute one type for another in a type.
 instance TySubstable Type where
-  tysubst s t = typeRec $ \ty -> if ty == t then s else ty
-
--- Substitute one type for another in a type scheme.
-instance TySubstable TypeScheme where
-  tysubst s t ts =
-    case s of
-      TyVar b x -> 
-        if x `elem` ts_tyvars_of ts || b then ts
-        else ts { ts_ty_of = tysubst s t (ts_ty_of ts) }
-      _ -> ts { ts_ty_of = tysubst s t (ts_ty_of ts) }
+  tysubst s t = typeRec $ \ty ->
+                            -- debugPrint "tysubst Type" $
+                            if ty == t then s else ty
 
 -- Substitute one type for another in a lambda term.
 instance TySubstable α => TySubstable (Term α) where
@@ -148,21 +114,30 @@ tysubstAll tsubst x =
   foldl (\acc (s, t) -> tysubst s t acc) x tsubst
 
 
--- Not used currently since we moved from substitution to closure
--- semantics.
--- class FreeVars a where freevars :: a -> [Id]
+--------------------------
+-- | Well-kindedness check
 
------------------------------
--- | Free variables of a term
+-- Assume type variables have kind *.
+kindCheck :: Type -> Maybe Kind
+kindCheck (TyAbs _ k s) = KArrow k <$> (kindCheck s)
+kindCheck (TyApp s t) = do
+  s' <- kindCheck s
+  t' <- kindCheck t
+  case s' of
+    KArrow s'' t'' -> if s'' == t' then return t'' else Nothing
+    _ -> Nothing
+kindCheck _ = Just KStar
 
--- instance FreeVars (Term α) where
---   freevars = aux []
---     where
---       aux bv (TmVar _ x)      = if x `elem` bv then [] else [x]
---       aux bv (TmAbs _ x _ t)  = aux (x:bv) t
---       aux bv (TmApp _ t1 t2)   = aux bv t1 ++ aux bv t2
---       aux bv (TmIf _ t1 t2 t3) = aux bv t1 ++ aux bv t2 ++ aux bv t3
---       aux _ _                  = []
+
+-----------------------
+-- | Type normalization
+
+-- I think it's fine to use the recursion scheme for this.
+normalize :: Type -> Type
+normalize = typeRec $
+  \ty -> case ty of
+    TyApp (TyAbs x _ t) s -> tysubst s (TyVar False x) t
+    _ -> ty
 
 
 -------------------------
@@ -171,104 +146,54 @@ tysubstAll tsubst x =
 class FreeTyVars a where
   freetyvars :: a -> [Type]
 
+-- This isn't the most satisfying solution... we just use the
+-- depth-bounded recursion scheme with d=100 to avoid infinite cycles
+-- in recursive types. It would be nice to somehow determine a minimum
+-- (or approximately minimum) value of d necessary to sufficiently
+-- search a type. This solution is 1) inefficient, and 2) potentially
+-- unsound for very large types.
 freeTyVarsAux :: [Id] -> Type -> [Type]
-freeTyVarsAux ids = typeRec2 $
-                    \ty -> case ty of
-                      TyVar b x -> if x `elem` ids then []
-                                   else [TyVar b x]
-                      _ -> []
+freeTyVarsAux ids = typeRec2_d 100 $
+                    \ty ->
+                      case ty of
+                        TyVar b x ->
+                          if x `elem` ids then []
+                          else [TyVar b x]
+                        _ -> []
 
 instance FreeTyVars Type where
   freetyvars = nub . freeTyVarsAux []
 
--- Forall quantified type variables of the type scheme are not free
-instance FreeTyVars TypeScheme where
-  freetyvars ts = nub $ freeTyVarsAux (ts_tyvars_of ts) (ts_ty_of ts)
+-- -- Forall quantified type variables of the type scheme are not free
+-- instance FreeTyVars TypeScheme where
+--   freetyvars ts = nub $ freeTyVarsAux (ts_tyvars_of ts) (ts_ty_of ts)
 
 
 ---------------------------------------------------------------
 -- | Fill in omitted typed annotations with auto-generated type
 -- variables.  Uses prefix "?X_".
 
--- TODO: monadic catamorphisms to generalize these operations?
-
 class GenTyVars a where
   gentyvars :: a -> State Int a
 
-instance GenTyVars Id where
-  gentyvars = return
-
-instance GenTyVars a => GenTyVars [a] where
-  gentyvars = mapM gentyvars
-
-instance (GenTyVars a, GenTyVars b) => GenTyVars (a, b) where
-  gentyvars = uncurry (liftA2 (,)) . bimap gentyvars gentyvars
-
 -- Generate fresh type variables for a type
 instance GenTyVars Type where
-  gentyvars (TyVar b (Id "")) = do
-    id' <- nextSym "?X_"
-    return (TyVar b (Id id'))
-  gentyvars (TyArrow ty1 ty2) =
-    pure TyArrow <*> gentyvars ty1 <*> gentyvars ty2
-  gentyvars (TyPair ty1 ty2) =
-    pure TyPair <*> gentyvars ty1 <*> gentyvars ty2
-  gentyvars (TySum ty1 ty2) =
-    pure TySum <*> gentyvars ty1 <*> gentyvars ty2
-  gentyvars (TyRef ty) = TyRef <$> gentyvars ty
-  gentyvars (TyVariant nm tyvars ctors) =
-    TyVariant nm tyvars <$> gentyvars ctors
-  gentyvars ty = return ty
-
+  gentyvars = typeRecM $
+    \ty -> case ty of
+      TyVar b (Id "") -> TyVar b . Id <$> nextSym "?X_"
+      _ -> return ty
+  
 -- Generate fresh type variables for a single term (including its
 -- subterms).
 instance GenTyVars (Term α) where
-  gentyvars (TmAbs fi x ty t) =
-    pure (TmAbs fi x) <*> gentyvars ty <*> gentyvars t
-  gentyvars (TmApp fi t1 t2) =
-    pure (TmApp fi) <*> gentyvars t1 <*> gentyvars t2
-  gentyvars (TmIf fi t1 t2 t3) =
-    pure (TmIf fi) <*> gentyvars t1 <*> gentyvars t2 <*> gentyvars t3
-  gentyvars (TmUnop fi u t) = TmUnop fi u <$> gentyvars t
-  gentyvars (TmBinop fi b t1 t2) =
-    pure (TmBinop fi b) <*> gentyvars t1 <*> gentyvars t2
-  gentyvars (TmPair fi t1 t2) =
-    pure (TmPair fi) <*> gentyvars t1 <*> gentyvars t2
-  gentyvars (TmInl fi tm ty) =
-    pure (TmInl fi) <*> gentyvars tm <*> gentyvars ty
-  gentyvars (TmInr fi tm ty) =
-    pure (TmInr fi) <*> gentyvars tm <*> gentyvars ty
-  gentyvars (TmCase fi discrim nm1 tm1 nm2 tm2) = do
-    discrim' <- gentyvars discrim
-    tm1' <- gentyvars tm1
-    tm2' <- gentyvars tm2
-    return $ TmCase fi discrim' nm1 tm1' nm2 tm2'
-  gentyvars (TmLet fi x tm1 tm2) =
-    pure (TmLet fi x) <*> gentyvars tm1 <*> gentyvars tm2
-  gentyvars (TmVariant fi nm tm) =
-    TmVariant fi nm <$> gentyvars tm
-  gentyvars (TmMatch fi discrim cases) =
-    pure (TmMatch fi) <*> gentyvars discrim <*> gentyvars cases    
-  gentyvars t@(TmVar _ _) = return t
-  gentyvars t@(TmUnit _) = return t
-  gentyvars t@(TmBool _ _) = return t
-  gentyvars t@(TmInt _ _) = return t
+  gentyvars = termTypeRecM gentyvars
 
 instance GenTyVars Pattern where
   gentyvars = return
 
 -- Generate fresh type variables for a single command
 instance GenTyVars (Command α) where
-  gentyvars (CDecl fi x ty) = CDecl fi x <$> gentyvars ty
-  gentyvars (CLet fi x t) = CLet fi x <$> gentyvars t
-  gentyvars (CEval fi t) = CEval fi <$> gentyvars t
-  gentyvars (CData fi nm tyvars ctors) =
-    CData fi nm tyvars <$> gentyvars ctors
-
--- -- Generate fresh type variables for an entire program.
--- instance GenTyVars (Prog α) where
---   gentyvars p =
---     p { prog_of = fst (runState (T.mapM gentyvars (prog_of p)) 0)}
+  gentyvars = commandTypeRecM gentyvars
 
 -- Generate fresh type variables for an entire program.
 genTypeVars :: Prog α -> Prog α
@@ -318,7 +243,6 @@ isTyVar _         = False
 isBiType :: Type -> Bool
 isBiType (TyArrow _ _) = True
 isBiType (TyPair _ _)  = True
-isBiType (TySum _ _)   = True
 isBiType _ = False
 
 isTyRef :: Type -> Bool
@@ -336,8 +260,7 @@ isRigid _ = False
 pairOfType :: Type -> (Type, Type)
 pairOfType (TyArrow s t) = (s, t)
 pairOfType (TyPair s t)  = (s, t)
-pairOfType (TySum s t)   = (s, t)
-pairOfType _ = error "pairOfType: expected arrow, pair, or sum type"
+pairOfType _ = error "pairOfType: expected arrow or pair type"
 
 tyOfRefType :: Type -> Type
 tyOfRefType (TyRef t) = t
@@ -348,6 +271,6 @@ idOfTy (TyVar _ x) = x
 idOfTy (TyVariant x _ _) = x
 idOfTy _ = error "idOfTy: expected variable or variant type"
 
-tysOfTy :: Type -> [Type]
-tysOfTy (TyVariant _ _ ctors) = concat $ snd <$> ctors
-tysOfTy _ = error "tysOfTy: expected variant type"
+tyargsOfTy :: Type -> [Type]
+tyargsOfTy (TyVariant _ tyargs _) = tyargs
+tyargsOfTy _ = error "tyargsOfTy: expected variant type"
