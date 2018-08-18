@@ -1,0 +1,58 @@
+
+data Option a =
+  | None
+  | Some a
+
+data List a =
+  | Nil
+  | Cons a (List a)
+
+val isnil : List a -> Bool
+let isnil = λ l.
+  destruct l as
+  | Nil -> ⊤
+  | _   -> ⊥
+
+〚 isnil (Cons 0 Nil) 〛
+
+val head : List a -> Option a
+let head = λ l.
+  destruct l as
+  | Nil      -> None
+  | Cons x _ -> Some x
+
+val tail : List a -> List a
+let tail = λ l.
+  destruct l as 
+  | Nil       -> Nil
+  | Cons _ l' -> l'
+
+val app : List a -> List a -> List a
+letrec app = λ l1. λ l2.
+  destruct l1 as 
+  | Nil -> l2
+  | Cons x l1' -> Cons x (app l1' l2)
+
+val concat : List (List a) -> List a
+letrec concat = λ l.
+  destruct l as
+  | Nil -> Nil
+  | Cons x l' -> app x (concat l')
+
+val length : List a -> Int
+letrec length = λl.
+  destruct l as
+  | Nil       -> 1
+  | Cons _ l' -> 1 + length l'
+
+val rev : List a -> List a
+letrec rev = λ l.
+  destruct l as
+  | Nil -> Nil
+  | Cons x l' -> app (rev l') (Cons x Nil)
+
+val range : Int -> List Int
+letrec range = λn.
+  if n <= 0 then Nil else Cons (n-1) (range (n-1))
+
+〚 head (tail (range 10)) 〛

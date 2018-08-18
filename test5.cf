@@ -5,5 +5,27 @@ data List a =
 
 let x = Cons 0 Nil
 
-# data D a =
-#   | D a (D a)
+# 〚 x 〛
+
+# val f : (List a -> Int) -> List a -> Int
+# let f = λg. λl.
+#   destruct l as
+#   | Cons _ ll -> g ll
+
+val length : List a -> Int
+letrec length = λl.
+  destruct l as
+  | Nil -> 1
+  | Cons _ ll -> 1 + length ll
+
+val range : Int -> List Int
+letrec range = λn.
+  if n <= 0 then Nil else Cons (n-1) (range (n-1))
+
+〚 length x 〛
+
+val l : List Int
+let l = range 100
+
+〚 l 〛
+# 〚 length l 〛

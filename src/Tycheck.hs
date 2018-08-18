@@ -120,10 +120,12 @@ tycheckTerm (TmAbs fi x ty tm) =
     y <- nextSym "?Y_"
     let tyy = TyVar False (Id y)
     let c' = c ++ [(tyy, TyArrow ty' ty'')]
-    debugPrint ("abs c: " ++ show c') $
+    -- debugPrint ("abs c: " ++ show c') $
+    debugPrint "abs c: " $
       tryUnify fi c' $
       \tsubst ->
-        debugPrint ("abs tsubst: " ++ show tsubst ++ "\n") $
+        -- debugPrint ("abs tsubst: " ++ show tsubst ++ "\n") $
+        debugPrint "abs tsubst\n" $
         return (tysubstAll tsubst $
                 TmAbs (mkData tyy) x ty' tm', c')
   
@@ -175,12 +177,16 @@ tycheckTerm (TmUnop fi u tm) =
   let ty = ty_of_term tm'
   case u of
 
-    UFix -> do
+    UFix ->
+      debugPrint "UFix" $ do
       y <- nextSym "?Y_"
       let tyy = TyVar False (Id y)
       let c' = c ++ [(ty, TyArrow tyy tyy)]
-      tryUnify fi c' $
+      -- let c' = c
+      debugPrint "UFix 2" $
+        tryUnify fi c' $
         \tsubst ->
+          debugPrint "UFix tsubst" $
           return (tysubstAll tsubst $ TmUnop (mkData tyy) u tm', c')
 
     _ | u == UFst || u == USnd -> do
@@ -272,37 +278,43 @@ tycheckTerm (TmLet fi x tm1 tm2) =
 -- interpreter.
 -- tycheckTerm (TmVariant fi x tms) = do (tms', cs) <-
 -- unzip <$> mapM tycheckTerm tms error ""
-tycheckTerm (TmVariant _ _ _) = throwError "unexpected TmVariant in typechecker"
+tycheckTerm (TmVariant _ _ _) =
+  throwError "unexpected TmVariant in typechecker"
 
 tycheckTerm (TmMatch fi discrim cases) =
-  debugPrint "TmMatch\n" $ do
+  debugPrint "TmMatch 1\n" $ do
   (discrim', c1) <- tycheckTerm discrim
-  (tys, binds, c2, tms') <-
-    quadmap id concat concat id . unzip4 <$>
-    mapM (\(p, tm) -> do
-             (ty, binds, cs) <- patternType fi p
-             (tm', cs') <-
-               local (updGamma $
-                      flip (foldl (\acc (x, t) ->
-                                      add x t acc)) binds)
-               $ tycheckTerm tm
-             return (ty, binds, cs ++ cs', tm')) cases
-  -- Need a type variable for the overall type, and if there are any
-  -- cases then we constrain it to be equal to their type. Also need
-  -- to constrain all of the case types to be the same.
-  y <- TyVar False . Id <$> nextSym "_Y?"
-  let c = c1 ++ c2 ++ map (\ty -> (ty, ty_of_term discrim')) tys ++
-          if length cases > 0 then
-            (y, ty_of_term (tms'!!0)) :
-            map (\tm -> (ty_of_term tm,
-                         ty_of_term (tms'!!0))) tms'
-          else []
-  ctx <- ask
-  tryUnify fi c $
-    \tsubst ->
-      return (tysubstAll tsubst $
-               TmMatch (mkData y) discrim' (zip (fst $ unzip cases) (tms')),
-               c)
+  debugPrint "TmMatch 2\n" $ do
+    (tys, binds, c2, tms') <-
+      quadmap id concat concat id . unzip4 <$>
+      mapM (\(p, tm) -> do
+               (ty, binds, cs) <- patternType fi p
+               (tm', cs') <-
+                 local (updGamma $
+                        flip (foldl (\acc (x, t) ->
+                                       add x t acc)) binds)
+                 $ tycheckTerm tm
+               return (ty, binds, cs ++ cs', tm')) cases
+    debugPrint "TmMatch 3\n" $ do
+      -- Need a type variable for the overall type, and if there are any
+      -- cases then we constrain it to be equal to their type. Also need
+      -- to constrain all of the case types to be the same.
+      y <- TyVar False . Id <$> nextSym "_Y?"
+      let c = c1 ++ c2 ++ map (\ty -> (ty, ty_of_term discrim')) tys ++
+              if length cases > 0 then
+                (y, ty_of_term (tms'!!0)) :
+                map (\tm -> (ty_of_term tm,
+                             ty_of_term (tms'!!0))) tms'
+              else []
+      ctx <- ask
+      debugPrint "TmMatch 4\n" $ do
+        tryUnify fi c $
+          \tsubst ->
+            debugPrint "TmMatch 5\n" $
+            return (tysubstAll tsubst $
+                     TmMatch (mkData y) discrim' (zip (fst $ unzip cases)
+                                                  (tms')),
+                    c)
 
 
 tycheckCommand :: Show α => Command α -> TycheckM (Command TyData)
@@ -311,9 +323,11 @@ tycheckCommand (CDecl fi x ty) =
   (resolveTyNames fi ty >>= wellKinded)
 
 tycheckCommand (CLet fi x t) =
+  debugPrint "CLet 1" $
   debugPrint (show t) $ do
     (t', c) <- tycheckTerm t
-    tryUnify fi c $
+    debugPrint "CLet 2" $
+      tryUnify fi c $
       \tsubst ->
         debugPrint ("CLet " ++ show x) $
         debugPrint ("t': " ++ show t') $
@@ -356,7 +370,8 @@ tycheckCommands (com:coms) = do
                  tycheckCommands coms
         return $ com' : coms'
 
-    CLet _ x tm -> do
+    CLet _ x tm ->
+      debugPrint "CLet 3" $ do
       decls <- asks ctx_decls
       γ <- asks ctx_gamma
       let ty = ty_of_term tm
@@ -442,8 +457,8 @@ generalize_ty ty = do
         (filter (\(TyVar _ x) -> not $ x `exists` γ) fvs)
   return $ mkTypeScheme generalizable ty
 
--- -- Passing False for the type variables rigidness doesn't matter since
--- -- the Eq instance for types ignores it.
+-- Passing False for the type variables rigidness doesn't matter since
+-- the Eq instance for types ignores it.
 instantiate_tyscheme :: Type -> TycheckM Type
 instantiate_tyscheme (TyAbs x k s) = do
   s' <- instantiate_tyscheme s
@@ -472,9 +487,7 @@ unify_tyschemes fi tyscheme1 tyscheme2 = do
     case unify [(ty1, ty2)] of
       Left (s, t) -> unifyError s t fi
       Right tsubst -> do
-        debugPrint ("ty1: " ++ show ty1) $
-          debugPrint ("ty2: " ++ show ty2) $
-          debugPrint ("tsubst: " ++ show tsubst ++ "\n") $ do
+        debugPrint ("tsubst: " ++ show tsubst ++ "\n") $ do
           return $ tysubstAll tsubst ty1
 
 
@@ -519,7 +532,6 @@ patternType fi (PConstructor nm ps) = do
   variantTypeConstr <- asks (Symtab.get nm . ctx_ctors)
   case variantTypeConstr of
     Just vTyConstr -> do
-      -- vTy@(TyVariant _ ctors) <- arbitrary_type vTyConstr
       vTy@(TyVariant _ _ ctors) <- instantiate_tyscheme vTyConstr
       case assocGet nm ctors of
         Just tys' ->

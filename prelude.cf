@@ -32,7 +32,7 @@ let double = λx. (x, x)
 
 # Force evaluation of the argument and return unit.
 val seq : a → Unit
-letrec seq = λ_. tt
+let seq = λ_. tt
 
 # Function composition.
 val compose : (a → b) → (b → c) → a → c
@@ -44,6 +44,9 @@ let tuple = λf. λg. λx. (f x, g x)
 
 val pair_fun : (a → c) → (b → d) → a × b → c × d
 let pair_fun = λf. λg. λp. (f p₁, g p₂)
+
+# This should be equivalent to the above.
+# let pair_fun = λf. λg. ⟨f ∘ π₁, g ∘ π₂⟩
 
 # Function cotupling.
 val cotuple : (a → c) → (b → c) → a + b → c

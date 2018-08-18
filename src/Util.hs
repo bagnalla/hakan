@@ -4,11 +4,11 @@ module Util where
 import Data.Bifunctor
 import System.IO.Unsafe
 
-debugPrint :: String -> b -> b
-debugPrint s x = seq (unsafePerformIO $ putStrLn $ s) x
-
 -- debugPrint :: String -> b -> b
--- debugPrint _ = id
+-- debugPrint s x = seq (unsafePerformIO $ putStrLn $ s) x
+
+debugPrint :: String -> b -> b
+debugPrint _ = id
 
 tupleFun :: (a -> b) -> (a -> c) -> a -> (b, c)
 tupleFun f g x = (f x, g x)

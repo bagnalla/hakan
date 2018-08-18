@@ -197,7 +197,7 @@ eval (TmMatch _ discrim cases) =
       env <- ask
       case bindPattern p v env of
         Just e -> local (const e) $ eval tm
-        -- If the pattern failed to match, try the next one.
+        -- If the pattern fails to match, try the next one.
         Nothing -> go cs v
     go [] _ = evalError "eval: failed to match any pattern"
 

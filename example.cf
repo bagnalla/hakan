@@ -27,7 +27,7 @@ let x2 = Inr ⊥
 #      | inl x → intToBool x
 #      | inr y → y
 
-val x3 : Sum ℤ Bool -> Bool
+val x3 : ℤ + Bool -> Bool
 let x3 = λx.
   destruct x1 as
   | Inl x → intToBool x

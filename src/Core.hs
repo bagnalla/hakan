@@ -39,11 +39,11 @@ type ConstrSet = [(Type, Type)]
 type TypeSubst = [(Type, Type)]
 
 unify :: ConstrSet -> Either (Type, Type) TypeSubst
-unify [] = Right []
+-- unify [] = Right []
+unify [] = debugPrint "unify terminating" $ Right []
 
 -- Rigid type variables refuse to change.
 unify ((s, t) : xs) =
-  -- debugPrint "unify" $
   if s == t then
     unify xs
   else if isTyVar s && (not $ isRigid s) &&
@@ -66,13 +66,53 @@ unify ((s, t) : xs) =
       unify $ (s', t') : xs
   else if isVariantTy s && isVariantTy t &&
           idOfTy s == idOfTy t then
-    debugPrint "unify variant" $
     let s' = tyargsOfTy s
         t' = tyargsOfTy t in
       unify $ zip s' t' ++ xs
   else
     -- Failed to unify s and t
     Left (s, t)
+
+-- -- Rigid type variables refuse to change.
+-- unify ((s, t) : xs) =
+--   debugPrint ("unifying " ++ show s ++ "  with " ++ show t) $
+--   if s == t then
+--     unify xs
+--   else if isTyVar s && (not $ isRigid s) &&
+--           (not $ s `elem` freetyvars t) then
+--     debugPrint "unify s 1" $ do
+--     let xs' = tysubst t s xs
+--     debugPrint "unify s 2" $ do
+--       rest <- unify xs'
+--       debugPrint "unify s 3" $ do
+--         return $ (t, s) : rest
+--   else if isTyVar t && (not $ isRigid t) &&
+--           (not $ t `elem` freetyvars s) then
+--     debugPrint "unify t" $ do
+--     rest <- unify $ tysubst s t xs
+--     debugPrint "unify t after" $ do
+--       return $ (s, t) : rest
+--   else if isBiType s && isBiType t then
+--     debugPrint "unify pair" $ do
+--     let (s1, s2) = pairOfType s
+--         (t1, t2) = pairOfType t in
+--       unify $ (s1, t1) : (s2, t2) : xs
+--   else if isTyRef s && isTyRef t then
+--     debugPrint "unify ref" $ do
+--     let s' = tyOfRefType s
+--         t' = tyOfRefType t in
+--       unify $ (s', t') : xs
+--   else if isVariantTy s && isVariantTy t &&
+--           idOfTy s == idOfTy t then
+--     debugPrint "unify variant" $
+--     let s' = tyargsOfTy s
+--         t' = tyargsOfTy t in
+--       debugPrint ("s': " ++ show s') $
+--       debugPrint ("t': " ++ show t') $
+--       unify $ zip s' t' ++ xs
+--   else
+--     -- Failed to unify s and t
+--     Left (s, t)
 
 
 -------------------------------
@@ -95,9 +135,7 @@ instance (Bifunctor f, TySubstable a, TySubstable b) =>
 
 -- Substitute one type for another in a type.
 instance TySubstable Type where
-  tysubst s t = typeRec $ \ty ->
-                            -- debugPrint "tysubst Type" $
-                            if ty == t then s else ty
+  tysubst s t = typeRec $ \ty -> if ty == t then s else ty
 
 -- Substitute one type for another in a lambda term.
 instance TySubstable α => TySubstable (Term α) where
@@ -146,28 +184,30 @@ normalize = typeRec $
 class FreeTyVars a where
   freetyvars :: a -> [Type]
 
--- This isn't the most satisfying solution... we just use the
--- depth-bounded recursion scheme with d=100 to avoid infinite cycles
--- in recursive types. It would be nice to somehow determine a minimum
--- (or approximately minimum) value of d necessary to sufficiently
--- search a type. This solution is 1) inefficient, and 2) potentially
--- unsound for very large types.
-freeTyVarsAux :: [Id] -> Type -> [Type]
-freeTyVarsAux ids = typeRec2_d 100 $
-                    \ty ->
-                      case ty of
-                        TyVar b x ->
-                          if x `elem` ids then []
-                          else [TyVar b x]
-                        _ -> []
+-- NOTE: remember to update this when extending the language types,
+-- since it isn't using any of the recursion schemes or catamorphisms.
 
+-- This isn't the most satisfying solution... we just use a depth
+-- bound to avoid infinite cycles in recursive types. It would be nice
+-- to somehow determine a minimum (or approximately minimum) value of
+-- d necessary to sufficiently search a type. The current solution is
+-- 1) inefficient, and 2) potentially unsound for very large types.
 instance FreeTyVars Type where
-  freetyvars = nub . freeTyVarsAux []
-
--- -- Forall quantified type variables of the type scheme are not free
--- instance FreeTyVars TypeScheme where
---   freetyvars ts = nub $ freeTyVarsAux (ts_tyvars_of ts) (ts_ty_of ts)
-
+  freetyvars = nub . go [] 100
+    where
+      go :: [Type] -> Int -> Type -> [Type]
+      go _ d _ | d <= 0 = []
+      go xs d ty@(TyVar _ _) = if ty `elem` xs then [] else [ty]
+      go xs d (TyAbs x _ s) = go (TyVar False x : xs) (d-1) s
+      go xs d (TyApp s t) = go xs (d-1) s ++ go xs (d-1) t
+      go xs d (TyArrow s t) = go xs (d-1) s ++ go xs (d-1) t
+      go xs d (TyPair s t) = go xs (d-1) s ++ go xs (d-1) t
+      go xs d (TyRef s) = go xs (d-1) s
+      go xs d (TyVariant _ tyargs ctors) =
+        -- debugPrint (show d) $
+        concat (go xs (d-1) <$> tyargs) ++
+        concat (go xs (d-1) <$> (concat $ snd $ unzip ctors))
+      go _ _ _ = []
 
 ---------------------------------------------------------------
 -- | Fill in omitted typed annotations with auto-generated type

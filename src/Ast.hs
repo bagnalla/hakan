@@ -161,7 +161,6 @@ typeRec2_d d f ty@(TyVariant _ tyargs ctors) =
 typeRec2_d _ f ty = f ty
 
 
-
 data Unop =
   UMinus
   | UNot
@@ -360,7 +359,7 @@ instance Eq Type where
   TyRef t1 == TyRef t2 = t1 == t2
   TyName nm1 == TyName nm2 = nm1 == nm2
   TyVariant nm1 tyargs1 ctors1 == TyVariant nm2 tyargs2 ctors2 =
-    nm1 == nm2 && tyargs1 == tyargs2 && ctors1 == ctors2
+    nm1 == nm2 && tyargs1 == tyargs2
   _ == _ = False
 
 instance Arbitrary Type where
