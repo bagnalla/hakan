@@ -33,6 +33,7 @@ tokens :-
   Bool                          { lex' TokenBoolTy }
   Int                           { lex' TokenIntTy }
   \ℤ                            { lex' TokenIntTy }
+  Char                          { lex' TokenCharTy }
   Unit                          { lex' TokenUnitTy }
   tt                            { lex' TokenTT }
   true                          { lex' $ TokenBool True }
@@ -98,16 +99,21 @@ tokens :-
   \〛                           { lex' TokenRRBracket }
   \[                            { lex' TokenLBracket }
   \]                            { lex' TokenRBracket }
+  \{                            { lex' TokenLBrace }
+  \}                            { lex' TokenRBrace }
   \⟨                            { lex' TokenLAngle }
   \⟩                            { lex' TokenRAngle }
   \∥                            { lex' TokenDoubleBar }
   \▵                            { lex' TokenTriangle }
   \▿                            { lex' TokenTriangleDown }
+  \?                            { lex' TokenQuestion }
   data                          { lex' TokenData }
   destruct                      { lex' TokenDestruct }
   as                            { lex' TokenAs }
   end                           { lex' TokenEnd }
+  record                        { lex' TokenRecord }
   -- eof                        { lex' TokenEOF }
+  \'.\'                         { lex (TokenChar . head . tail) }
   $capital [$alpha $digit \_ \']* { lex (TokenCapId . Id) }
   $alpha [$alpha $digit \_ \']*   { lex (TokenId . Id) }
 
@@ -132,6 +138,7 @@ data Token = Token AlexPosn TokenClass
 data TokenClass =
   TokenId Id
   | TokenCapId Id
+  | TokenChar Char
   | TokenLParen
   | TokenRParen
   | TokenColon
@@ -139,6 +146,7 @@ data TokenClass =
   | TokenLambda
   | TokenBoolTy
   | TokenIntTy
+  | TokenCharTy
   | TokenUnitTy
   | TokenTT
   | TokenArrow
@@ -187,6 +195,8 @@ data TokenClass =
   | TokenRRBracket
   | TokenLBracket
   | TokenRBracket
+  | TokenLBrace
+  | TokenRBrace
   | TokenLAngle
   | TokenRAngle
   | TokenTimes
@@ -204,12 +214,15 @@ data TokenClass =
   | TokenDestruct
   | TokenAs
   | TokenEnd
+  | TokenRecord
+  | TokenQuestion
     deriving (Eq,Show)
 
 -- For nice parser error messages.
 unLex :: TokenClass -> String
 unLex (TokenId x)          = show x
 unLex (TokenCapId x)       = show x
+unLex (TokenChar c)        = show c
 unLex TokenLParen          = "("
 unLex TokenRParen          = ")"
 unLex TokenColon           = ":"
@@ -218,6 +231,7 @@ unLex TokenBar             = "|"
 unLex TokenLambda          = "\\"
 unLex TokenBoolTy          = "Bool"
 unLex TokenIntTy           = "Int"
+unLex TokenCharTy          = "Char"
 unLex TokenUnitTy          = "Unit"
 unLex TokenTT              = "tt"
 unLex TokenArrow           = "->"
@@ -266,6 +280,8 @@ unLex TokenLLBracket       = "〚"
 unLex TokenRRBracket       = "〛"
 unLex TokenLBracket        = "["
 unLex TokenRBracket        = "]"
+unLex TokenLBrace          = "{"
+unLex TokenRBrace          = "}"
 unLex TokenLAngle          = "⟨"
 unLex TokenRAngle          = "⟩"
 unLex TokenTimes           = "×"
@@ -279,6 +295,8 @@ unLex TokenData            = "data"
 unLex TokenDestruct        = "destruct"
 unLex TokenAs              = "as"
 unLex TokenEnd             = "end"
+unLex TokenRecord          = "record"
+unLex TokenQuestion        = "?"
 unLex TokenEOF             = "<EOF>"
 
 alexEOF :: Alex Token

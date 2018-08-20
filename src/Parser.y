@@ -23,6 +23,7 @@ import Ast (data_of_term)
   '.'          { Token $$ TokenDot }
   bool         { Token $$ TokenBoolTy }
   int          { Token $$ TokenIntTy }
+  char         { Token $$ TokenCharTy }
   unit         { Token $$ TokenUnitTy }
   tt           { Token $$ TokenTT }
   true         { Token $$ (TokenBool True) }
@@ -36,6 +37,7 @@ import Ast (data_of_term)
   check        { Token $$ TokenCheck }
   id           { Token _ (TokenId _) }
   capid        { Token _ (TokenCapId _) }
+  charVal      { Token _ (TokenChar _) }
 --  fst          { Token $$ TokenFst }
 --  snd          { Token $$ TokenSnd }
   "π₁"         { Token $$ TokenPi1 }
@@ -76,6 +78,8 @@ import Ast (data_of_term)
   '〛'         { Token $$ TokenRRBracket }
   '['          { Token $$ TokenLBracket }
   ']'          { Token $$ TokenRBracket }
+  '{'          { Token $$ TokenLBrace }
+  '}'          { Token $$ TokenRBrace }
   '⟨'          { Token $$ TokenLAngle }
   '⟩'          { Token $$ TokenRAngle }
   '∘'          { Token $$ TokenCompose }
@@ -86,10 +90,12 @@ import Ast (data_of_term)
   '∥'          { Token $$ TokenDoubleBar }
   '▵'          { Token $$ TokenTriangle }
   '▿'          { Token $$ TokenTriangleDown }
+  '?'          { Token $$ TokenQuestion }
   data         { Token $$ TokenData }
   destruct     { Token $$ TokenDestruct }
   as           { Token $$ TokenAs }
   end           { Token $$ TokenEnd }
+  record       { Token $$ TokenRecord }
   -- eof          { Token $$ TokenEOF }
 
 %nonassoc ':'
@@ -105,12 +111,12 @@ import Ast (data_of_term)
 %left '*' '/' '×' '⊗'
 %left '∘'
 %left '▵' '▿'
-%nonassoc fix true false intVal id unit bool int
+%nonassoc fix true false intVal id unit bool int char
 %left APP
 %nonassoc UNOP
 %nonassoc '-'
---%nonassoc '₁' '₂'
-%nonassoc '(' ')'
+%nonassoc '₁' '₂' '?'
+%nonassoc '(' ')' '[' ']'
 %%
 
 Prog :
@@ -125,9 +131,12 @@ AType :
   unit { Ast.TyUnit }
   | bool { Ast.TyBool }
   | int { Ast.TyInt }
+  | char { Ast.TyChar }
   | '(' Type ')' { $2 }
   | id { Ast.TyVar False $ idFromToken $1 }
   | capid { Ast.TyName (idFromToken $1) }
+  | '[' Type ']'
+    { Ast.TyApp (Ast.TyName $ Id "List") $2 }
 
 AppType :
   AType { $1 }
@@ -136,9 +145,11 @@ AppType :
 Type :
   AppType { $1 }
   | Type arrow Type { Ast.TyArrow $1 $3 }
-  | Type '×' Type { Ast.TyPair $1 $3 }
+  | Type '×' Type
+    { Ast.TyApp (Ast.TyApp (Ast.TyName $ Id "Pair") $1) $3 }
   | Type '+' Type
     { Ast.TyApp (Ast.TyApp (Ast.TyName $ Id "Sum") $1) $3 }
+  | Type '?' { Ast.TyApp (Ast.TyName $ Id "Option") $1 }
 
 -- The only reason we duplicate the grammar for types is so that type
 -- variables in a type declaration are marked as rigid. There is probably
@@ -149,9 +160,12 @@ DeclAType :
   unit { Ast.TyUnit }
   | bool { Ast.TyBool }
   | int { Ast.TyInt }
+  | char { Ast.TyChar }
   | '(' DeclType ')' { $2 }
   | id { Ast.TyVar True $ idFromToken $1 }
   | capid { Ast.TyName (idFromToken $1) }
+  | '[' DeclType ']'
+    { Ast.TyApp (Ast.TyName $ Id "List") $2 }
 
 DeclAppType :
   DeclAType { $1 }
@@ -160,9 +174,11 @@ DeclAppType :
 DeclType :
   DeclAppType { $1 }
   | DeclType arrow DeclType { Ast.TyArrow $1 $3 }
-  | DeclType '×' DeclType { Ast.TyPair $1 $3 }
+  | DeclType '×' DeclType
+    { Ast.TyApp (Ast.TyApp (Ast.TyName $ Id "Pair") $1) $3 }
   | DeclType '+' DeclType
     { Ast.TyApp (Ast.TyApp (Ast.TyName $ Id "Sum") $1) $3 }
+  | DeclType '?' { Ast.TyApp (Ast.TyName $ Id "Option") $1 }
 
 Id :
   '_' { Token $1 (TokenId (Id "_")) }
@@ -214,18 +230,25 @@ ATerm :
   | true { Ast.TmBool $1 True }
   | false { Ast.TmBool $1 False }
   | intVal { Ast.TmInt (infoFromToken $1) (intFromToken $1) }
+  | charVal { Ast.TmChar (infoFromToken $1) (charFromToken $1) }
   | id { Ast.TmVar (infoFromToken $1) (idFromToken $1) }
   | capid { Ast.TmVar (infoFromToken $1) (idFromToken $1) }
   | "π₁" { Ast.TmVar $1 (Id "proj1") }
   | "π₂" { Ast.TmVar $1 (Id "proj2") }
   | '(' Term ')' { $2 }
-  | '(' Term ',' Term ')' { Ast.TmPair $1 $2 $4 }
+--  | '(' Term ',' Term ')' { Ast.TmVariant $1 (Id "Pair") [$2, $4] }
+  | '(' Term ',' Term ')'
+    { Ast.TmApp $1 (Ast.TmApp $1 (Ast.TmVar $1 (Id "Pair")) $2) $4 }
   | '[' Term ',' Term ']'
     { Ast.TmApp $1 (Ast.TmApp $1 (Ast.TmVar $1 (Id "cotuple")) $2) $4 }
   | '⟨' Term ',' Term '⟩'
     { Ast.TmApp $1 (Ast.TmApp $1 (Ast.TmVar $1 (Id "tuple")) $2) $4 }
-  | ATerm '₁' { Ast.TmUnop $2 Ast.UFst $1 }
-  | ATerm '₂' { Ast.TmUnop $2 Ast.USnd $1 }
+  | ATerm '₁' { Ast.TmApp $2 (Ast.TmVar $2 (Id "proj1")) $1 }
+  | ATerm '₂' { Ast.TmApp $2 (Ast.TmVar $2 (Id "proj2")) $1 }
+  | '{' seplist(Field, ',') '}' { Ast.TmRecord $1 $2 }
+
+Field :
+  id '=' Term { (idFromToken $1, $3) }
 
 Case :
   Pattern arrow Term { ($1, $3) }
@@ -239,13 +262,22 @@ APattern :
   | true { Ast.PBool True }
   | false { Ast.PBool False }
   | intVal { Ast.PInt (intFromToken $1) }
+  | charVal { Ast.PChar (charFromToken $1) }
   | Id { Ast.PVar (idFromToken $1) }
   | '(' Pattern ')' { $2 }
   | '(' Pattern ',' Pattern ')' { Ast.PPair $2 $4 }
+  | '{' seplist(FieldPattern, ',') '}' { Ast.PRecord $2 }
+
+FieldPattern :
+  id '=' Pattern { (idFromToken $1, $3) }
 
 list(p) :
   p list(p) { $1 : $2 }
   | { [] }
+
+seplist(p, sep) :
+  p { [$1] }
+  | p sep seplist(p, sep) { $1 : $3 }
 
 barlist(p) :
   '|' p barlist(p) { $2 : $3 }
@@ -268,9 +300,12 @@ Command :
   | evaluate Term { Ast.CEval $1 $2 }
   | '〚' Term '〛' { Ast.CEval $1 $2 }
   | data capid list(id) '=' barlist(Ctor)
-      { case $2 of
-          Token fi (TokenCapId x) -> 
-            Ast.CData fi x (map idFromToken $3) $5 }
+      { Ast.CData $1 (idFromToken $2) (map idFromToken $3) $5 }
+  | record capid list(id) '=' '{' seplist(FieldDecl, ',') '}'
+      { Ast.CRecord $1 (idFromToken $2) (map idFromToken $3) $6 }
+
+FieldDecl :
+  id TyBinder { (idFromToken $1, $2) }
 
 TyBinder :
   ':' Type { $2 }
@@ -306,6 +341,10 @@ idFromToken tok = case tok of
 intFromToken :: Token -> Integer
 intFromToken tok = case tok of
   Token _ (TokenInt i) -> i
+
+charFromToken :: Token -> Char
+charFromToken tok = case tok of
+  Token _ (TokenChar c) -> c
 
 infoFromToken :: Token -> AlexPosn
 infoFromToken tok = case tok of

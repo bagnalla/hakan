@@ -1,10 +1,4 @@
-
-data Pair a b =
-  | Pair a b
-
-data Sum a b =
-  | Inl a
-  | Inr b
+∃ base
 
 val nand : Bool → Bool → Bool
 let nand = λx. λy. ¬ (x ∧ y)
@@ -21,11 +15,11 @@ let succ = λx. x + 1
 val pred : ℤ → ℤ
 let pred = λx. x - 1
 
-val proj1 : a × b → a
-let proj1 = λp. p₁
+# val proj1 : a × b → a
+# let proj1 = λp. p₁
 
-val proj2 : a × b → b
-let proj2 = λp. p₂
+# val proj2 : a × b → b
+# let proj2 = λp. p₂
 
 val double : a → a × a
 let double = λx. (x, x)

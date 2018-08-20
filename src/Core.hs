@@ -15,7 +15,8 @@ module Core (
   isTyVar,
   fixTy,
   normalize,
-  kindCheck
+  kindCheck,
+  tysubst'
   ) where
 
 -- import Control.Applicative (liftA2)
@@ -27,7 +28,7 @@ import qualified Data.Traversable as T
 import Ast
 import Gensym (nextSym)
 import Symtab (Id(..), Symtab, map)
-import Util (debugPrint)
+import Util (debugPrint, mapSnd)
 
 ----------------
 -- | Unification
@@ -39,8 +40,8 @@ type ConstrSet = [(Type, Type)]
 type TypeSubst = [(Type, Type)]
 
 unify :: ConstrSet -> Either (Type, Type) TypeSubst
--- unify [] = Right []
-unify [] = debugPrint "unify terminating" $ Right []
+unify [] = Right []
+-- unify [] = debugPrint "unify terminating" $ Right []
 
 -- Rigid type variables refuse to change.
 unify ((s, t) : xs) =
@@ -49,12 +50,12 @@ unify ((s, t) : xs) =
   else if isTyVar s && (not $ isRigid s) &&
           (not $ s `elem` freetyvars t) then
     do
-      rest <- unify $ tysubst t s xs
+      rest <- unify $ tysubst' t s xs
       return $ (t, s) : rest
   else if isTyVar t && (not $ isRigid t) &&
           (not $ t `elem` freetyvars s) then
     do
-      rest <- unify $ tysubst s t xs
+      rest <- unify $ tysubst' s t xs
       return $ (s, t) : rest
   else if isBiType s && isBiType t then
     let (s1, s2) = pairOfType s
@@ -64,7 +65,8 @@ unify ((s, t) : xs) =
     let s' = tyOfRefType s
         t' = tyOfRefType t in
       unify $ (s', t') : xs
-  else if isVariantTy s && isVariantTy t &&
+  else if (isVariantTy s && isVariantTy t ||
+           isRecordTy s && isRecordTy t) &&
           idOfTy s == idOfTy t then
     let s' = tyargsOfTy s
         t' = tyargsOfTy t in
@@ -81,7 +83,7 @@ unify ((s, t) : xs) =
 --   else if isTyVar s && (not $ isRigid s) &&
 --           (not $ s `elem` freetyvars t) then
 --     debugPrint "unify s 1" $ do
---     let xs' = tysubst t s xs
+--     let xs' = tysubst' t s xs
 --     debugPrint "unify s 2" $ do
 --       rest <- unify xs'
 --       debugPrint "unify s 3" $ do
@@ -89,7 +91,7 @@ unify ((s, t) : xs) =
 --   else if isTyVar t && (not $ isRigid t) &&
 --           (not $ t `elem` freetyvars s) then
 --     debugPrint "unify t" $ do
---     rest <- unify $ tysubst s t xs
+--     rest <- unify $ tysubst' s t xs
 --     debugPrint "unify t after" $ do
 --       return $ (s, t) : rest
 --   else if isBiType s && isBiType t then
@@ -119,11 +121,11 @@ unify ((s, t) : xs) =
 -- | Type variable substitution
 
 class TySubstable a where
-  tysubst :: Type -> Type -> a -> a
+  tysubst :: Bool -> Type -> Type -> a -> a
 
 -- Lift type substitution to lists.
 instance TySubstable a => TySubstable [a] where
-  tysubst s t = fmap $ tysubst s t
+  tysubst b s t = fmap $ tysubst b s t
 
 -- Lift type substitution to any bifunctor (e.g., pair). It would be
 -- nice to use a similar instance for functors so we don't need the
@@ -131,25 +133,49 @@ instance TySubstable a => TySubstable [a] where
 -- instances?) for Term.
 instance (Bifunctor f, TySubstable a, TySubstable b) =>
          TySubstable (f a b) where
-  tysubst s t = bimap (tysubst s t) (tysubst s t)
+  tysubst b s t = bimap (tysubst b s t) (tysubst b s t)
 
 -- Substitute one type for another in a type.
 instance TySubstable Type where
-  tysubst s t = typeRec $ \ty -> if ty == t then s else ty
+  -- tysubst s t = typeRec $ \ty -> if ty == t then s else ty
+  
+  tysubst b s t ty@(TyAbs x k ty1) =
+    if t == TyVar False x then ty else
+      if b && TyVar False x `elem` freetyvars s then
+      let x' = Id $ unId x ++ "_" in
+        TyAbs x' k $ tysubst b s t
+        (tysubst b (TyVar False x') (TyVar False x) ty1)
+      else
+        TyAbs x k $ tysubst b s t ty1
+  tysubst b s t (TyApp ty1 ty2) =
+    TyApp (tysubst b s t ty1) (tysubst b s t ty2)
+  tysubst b s t (TyArrow ty1 ty2) =
+    TyArrow (tysubst b s t ty1) (tysubst b s t ty2)
+  tysubst b s t (TyRef ty) = TyRef (tysubst b s t ty)
+  tysubst b s t (TyVariant x tyargs ctors) =
+    TyVariant x (tysubst b s t <$> tyargs) $
+    fmap (mapSnd $ fmap $ tysubst b s t) ctors
+  tysubst b s t (TyRecord x tyargs fields) =
+    TyRecord x (tysubst b s t <$> tyargs) $
+    fmap (mapSnd $ tysubst b s t) fields
+  tysubst _ s t ty = if ty == t then s else ty
 
 -- Substitute one type for another in a lambda term.
 instance TySubstable α => TySubstable (Term α) where
-  tysubst s t = termTypeRec $ tysubst s t
+  tysubst b s t = termTypeRec $ tysubst b s t
 
 -- Substitute one type for another in a typing context.
 instance (TySubstable β) => TySubstable (Symtab β) where
-  tysubst s t = Symtab.map (tysubst s t)
+  tysubst b s t = Symtab.map (tysubst b s t)
+
+tysubst' :: TySubstable a => Type -> Type -> a -> a
+tysubst' = tysubst True
 
 -- Fold over a list of individual substitutions on an instance of
 -- TySubstClass.
 tysubstAll :: TySubstable a => TypeSubst -> a -> a
 tysubstAll tsubst x =
-  foldl (\acc (s, t) -> tysubst s t acc) x tsubst
+  foldl (\acc (s, t) -> tysubst' s t acc) x tsubst
 
 
 --------------------------
@@ -174,9 +200,8 @@ kindCheck _ = Just KStar
 normalize :: Type -> Type
 normalize = typeRec $
   \ty -> case ty of
-    TyApp (TyAbs x _ t) s -> tysubst s (TyVar False x) t
+    TyApp (TyAbs x _ t) s -> tysubst' s (TyVar False x) t
     _ -> ty
-
 
 -------------------------
 -- | Free type variables
@@ -192,8 +217,10 @@ class FreeTyVars a where
 -- to somehow determine a minimum (or approximately minimum) value of
 -- d necessary to sufficiently search a type. The current solution is
 -- 1) inefficient, and 2) potentially unsound for very large types.
+-- I think it should be not too difficult to compute a sufficient
+-- value for d.
 instance FreeTyVars Type where
-  freetyvars = nub . go [] 100
+  freetyvars = nub . go [] 20
     where
       go :: [Type] -> Int -> Type -> [Type]
       go _ d _ | d <= 0 = []
@@ -201,12 +228,13 @@ instance FreeTyVars Type where
       go xs d (TyAbs x _ s) = go (TyVar False x : xs) (d-1) s
       go xs d (TyApp s t) = go xs (d-1) s ++ go xs (d-1) t
       go xs d (TyArrow s t) = go xs (d-1) s ++ go xs (d-1) t
-      go xs d (TyPair s t) = go xs (d-1) s ++ go xs (d-1) t
       go xs d (TyRef s) = go xs (d-1) s
       go xs d (TyVariant _ tyargs ctors) =
-        -- debugPrint (show d) $
         concat (go xs (d-1) <$> tyargs) ++
         concat (go xs (d-1) <$> (concat $ snd $ unzip ctors))
+      go xs d (TyRecord _ tyargs fields) =
+        concat (go xs (d-1) <$> tyargs) ++
+        concat (go xs (d-1) <$> (snd $ unzip fields))
       go _ _ _ = []
 
 ---------------------------------------------------------------
@@ -245,13 +273,13 @@ genTypeVars p =
 -- | Recursive type stuff
 
 abstractTy :: Id -> Type -> Type -> Type
-abstractTy x ty s = tysubst s (TyVar False x) ty
+abstractTy x ty s = tysubst False s (TyVar False x) ty
 
 abstractTys :: [Id] -> [Type] -> [Type] -> [Type]
 abstractTys xs tys tys' =
   Prelude.map (\ty -> foldl f ty (zip xs tys')) tys
   where f acc (x, ty) =
-          tysubst (TyVar False x) ty acc
+          tysubst False (TyVar False x) ty acc
 
 fixTy :: Id -> Type -> Type
 fixTy x ty = fix (abstractTy x ty)
@@ -266,11 +294,15 @@ fixTys xs tys =
 
 boolOfTerm :: Term α -> Bool
 boolOfTerm (TmBool _ b) = b
-boolOfTerm _ = error "boolOf: expected boolean term"
+boolOfTerm _ = error "boolOfTerm: expected boolean term"
 
 intOfTerm :: Term α -> Integer
 intOfTerm (TmInt _ i) = i
-intOfTerm _ = error "intOf: expected integer term"
+intOfTerm _ = error "intOfTerm: expected integer term"
+
+charOfTerm :: Term α -> Char
+charOfTerm (TmChar _ c) = c
+charOfTerm _ = error "charOfTerm: expected char term"
 
 idOfType :: Type -> Maybe Id
 idOfType (TyVar _ x) = Just x
@@ -282,7 +314,6 @@ isTyVar _         = False
 
 isBiType :: Type -> Bool
 isBiType (TyArrow _ _) = True
-isBiType (TyPair _ _)  = True
 isBiType _ = False
 
 isTyRef :: Type -> Bool
@@ -293,13 +324,16 @@ isVariantTy :: Type -> Bool
 isVariantTy (TyVariant _ _ _) = True
 isVariantTy _ = False
 
+isRecordTy :: Type -> Bool
+isRecordTy (TyRecord _ _ _) = True
+isRecordTy _ = False
+
 isRigid :: Type -> Bool
 isRigid (TyVar True _) = True
 isRigid _ = False
 
 pairOfType :: Type -> (Type, Type)
 pairOfType (TyArrow s t) = (s, t)
-pairOfType (TyPair s t)  = (s, t)
 pairOfType _ = error "pairOfType: expected arrow or pair type"
 
 tyOfRefType :: Type -> Type
@@ -309,8 +343,10 @@ tyOfRefType _ = error "tyOfRef: expected ref type"
 idOfTy :: Type -> Id
 idOfTy (TyVar _ x) = x
 idOfTy (TyVariant x _ _) = x
-idOfTy _ = error "idOfTy: expected variable or variant type"
+idOfTy (TyRecord x _ _) = x
+idOfTy _ = error "idOfTy: expected variable, variant, or record type"
 
 tyargsOfTy :: Type -> [Type]
 tyargsOfTy (TyVariant _ tyargs _) = tyargs
-tyargsOfTy _ = error "tyargsOfTy: expected variant type"
+tyargsOfTy (TyRecord _ tyargs _) = tyargs
+tyargsOfTy _ = error "tyargsOfTy: expected variant or record xtype"

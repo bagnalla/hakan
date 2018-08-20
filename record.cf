@@ -1,0 +1,39 @@
+∃ base
+
+data List a =
+  | Nil
+  | Cons a (List a)
+
+record Person a =
+  { age  : ℤ
+  , male : Bool
+  , meta : a }
+
+# val f : Person -> Int
+# let f = age
+
+# val x : Person
+# let x = { age = 21, male = ⊤ }
+
+val x : Person ℤ
+let x = { age = 21, male = ⊤, meta = 123 }
+
+val y : Person [Char]
+let y = { age = 28, male = ⊤, meta = Cons 'a' Nil }
+
+# 〚 f x 〛
+
+
+val f : Person a → ℤ × Bool × a
+let f = λ x.
+  destruct x as
+  | { age = y, male = z, meta = w } → ((y, z), w)
+
+val result1 : ℤ × Bool × ℤ
+let result1 = f x
+
+val result2 : ℤ × Bool × [Char]
+let result2 = f y
+
+〚 result1 〛
+〚 result2 〛

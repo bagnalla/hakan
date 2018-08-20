@@ -1,4 +1,15 @@
-∃ prelude
+# ∃ prelude
+∃ base
+
+
+# Function composition.
+val compose : (a → b) → (b → c) → a → c
+let compose = λf. λg. λx. g (f x)
+
+# Function tupling.
+val tuple : (a → b) → (a → c) → a → b × c
+let tuple = λf. λg. λx. (f x, g x)
+
 
 # \Bbb{Z}
 
@@ -54,10 +65,10 @@ let incn = μ (λg. λn.
 val triangle : ℤ → ℤ
 letrec triangle = λn. if n = 0 then 0 else n + triangle (n - 1)
 
-〚 dontimes (λ_. counter ← !counter + 1)
-            (let x = 5 in triangle (100 + x));
-   seq (!counter);
-   fact 10 〛
+# 〚 dontimes (λ_. counter ← !counter + 1)
+#             (let x = 5 in triangle (100 + x));
+#    seq (!counter);
+#    fact 10 〛
 
 
 let f = λx. x + 5

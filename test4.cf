@@ -1,20 +1,25 @@
-val compose : (a → b) → (b → c) → a → c
-let compose = λf. λg. λx. g (f x)
+# val compose : (a → b) → (b → c) → a → c
+# let compose = λf. λg. λx. g (f x)
 
-val proj1 : a × b → a
-let proj1 = λp. p₁
+# val proj1 : a × b → a
+# let proj1 = λp. p₁
 
-val proj2 : a × b → b
-let proj2 = λp. p₂
+# val proj2 : a × b → b
+# let proj2 = λp. p₂
+
+data Pair a b =
+  | Pair a b
 
 val tuple : (a → b) → (a → c) → a → b × c
 let tuple = λf. λg. λx. (f x, g x)
 
-let f = λx. x + 5
+# val tuple : b × c
 
-let g = λx. x * 2
+# let f = λx. x + 5
 
-val h : ℤ × ℤ → ℤ × ℤ
-let h = ⟨f ∘ π₁, g ∘ π₂⟩
+# let g = λx. x * 2
 
-〚 h (1, 2) 〛# ==> (6, 4)
+# val h : ℤ × ℤ → ℤ × ℤ
+# let h = ⟨f ∘ π₁, g ∘ π₂⟩
+
+# 〚 h (1, 2) 〛# ==> (6, 4)

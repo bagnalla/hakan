@@ -10,11 +10,12 @@ module Eval (
 import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
-import Data.List (intercalate)
+import Data.List (intercalate, sortBy)
 
 import Ast
-import Symtab (Symtab, Id(..), empty, add, exists, fold)
+import Symtab (Symtab, Id(..), empty, add, exists, fold, assocGet)
 import qualified Symtab as S (map, get)
+import Util (debugPrint, mapSndM)
 
 newtype Env = Env { unEnv :: Symtab Value }
   deriving Eq
@@ -23,10 +24,11 @@ data Value =
   VUnit
   | VBool Bool
   | VInt Integer
+  | VChar Char
   | VClos Env Id (Term ())
-  | VPair Value Value
   | VLoc Id
   | VVariant Id [Value]
+  | VRecord [(Id, Value)]
   deriving Eq
 
 -- TODO: fix printing of closure environments in the presence of
@@ -35,13 +37,15 @@ instance Show Value where
   show VUnit = "VUnit"
   show (VBool b) = "(VBool " ++ show b ++ ")"
   show (VInt i) = "(VInt " ++ show i ++ ")"
+  show (VChar c) = "(VChar " ++ show c ++ ")"
   show (VClos env x t) = "(VClos " ++ show x ++ " " ++ show t ++ ")"
   -- show (VClos env x t) = "(VClos (env = " ++ show env ++ ") " ++ show x ++
   --   " " ++ show t ++ ")"
-  show (VPair v1 v2) = "(VPair " ++ show v1 ++ " " ++ show v2 ++ ")"
   show (VLoc x) = "(VLoc " ++ show x ++ ")"
   show (VVariant x vs) = "(VVariant " ++ show x ++ " " ++
     intercalate " " (show <$> vs) ++ ")"
+  show (VRecord fields) =
+    "(VRecord " ++ intercalate " " (show <$> fields) ++ ")"
 
 instance Show Env where
   show =
@@ -50,6 +54,10 @@ instance Show Env where
 intOfValue :: Value -> Integer
 intOfValue (VInt i) = i
 intOfValue _ = error "intOfValue: expected VInt"
+
+charOfValue :: Value -> Char
+charOfValue (VChar c) = c
+charOfValue _ = error "charOfValue: expected VChar"
 
 boolOfValue :: Value -> Bool
 boolOfValue (VBool b) = b
@@ -65,8 +73,8 @@ evalError :: (MonadReader Env m, MonadState (b, Env) m) => String -> m a
 evalError s = do
   env <- ask
   (_, heap) <- get
-  error $ "runtime error!\nenvironment:\n" ++ show env ++ "\n\nheap: " ++
-    show heap ++ "\n\n" ++ s
+  error $ "runtime error!\nenvironment:\n" ++ show env ++ "\n\nheap: "
+    ++ show heap ++ "\n\n" ++ s
 
 
 ------------------------
@@ -85,11 +93,13 @@ eval (TmAbs _ nm ty tm) = do
   ctx <- ask -- close over the current environment
   return $ VClos ctx nm tm
 
-eval (TmApp _ t1 t2) = do
+eval (TmApp _ t1 t2) =
+  debugPrint "eval TmApp" $ do
   v1 <- eval t1
   v2 <- eval t2
   case v1 of
     VClos clos nm body ->
+      debugPrint ("v1: " ++ show v1) $
       -- Force call-by-value order with seq
       seq v2 $ local (const $ extendEnv nm v2 clos) $ eval body
     _ -> evalError $ "eval: " ++ show v1 ++ " isn't a closure"
@@ -105,6 +115,8 @@ eval (TmIf _ t1 t2 t3) = do
     _ -> evalError $ "eval: " ++ show v1 ++ " isn't a bool"
 
 eval (TmInt _ i) = return $ VInt i
+
+eval (TmChar _ c) = return $ VChar c
 
 eval (TmUnop _ u tm) = do
   v <- eval tm
@@ -123,14 +135,6 @@ eval (TmUnop _ u tm) = do
         VClos clos nm tm' ->
           mfix $ \f -> local (const $ extendEnv nm f clos) $ eval tm'
         _ -> evalError $ "eval: " ++ show v ++ " isn't a closure"
-    UFst ->
-      case v of
-        VPair x _ -> return x
-        _ -> evalError $ "eval: " ++ show v ++ " isn't a pair"
-    USnd ->
-      case v of
-        VPair _ y -> return y
-        _ -> evalError $ "eval: " ++ show v ++ " isn't a pair"
     URef -> do
       loc <- freshLoc
       modify $ \(i, Env env) -> (i, Env $ add loc v env)
@@ -177,16 +181,13 @@ eval (TmBinop _ b t1 t2) = do
         _ -> evalError $ "eval: " ++ show b ++
              " isn't a reference update binop"
 
-eval (TmPair _ t1 t2) = do
-  v1 <- eval t1
-  v2 <- eval t2
-  return $ VPair v1 v2
-
 eval (TmLet _ x tm1 tm2) = do
   v1 <- eval tm1
   local (Env . add x v1 . unEnv) $ eval tm2
 
 eval (TmVariant _ x tms) = VVariant x <$> mapM eval tms
+
+eval (TmRecord _ fields) = VRecord <$> mapM (mapSndM eval) fields
 
 -- Here we do the actual pattern matching work (extending environment
 -- with bindings from the pattern match).
@@ -213,12 +214,22 @@ bindPattern (PBool True) (VBool True) = Just . id
 bindPattern (PBool False) (VBool False) = Just . id
 bindPattern (PInt n) (VInt m) =
   if n == m then Just . id else const Nothing
-bindPattern (PPair p1 p2) (VPair v1 v2) =
-  bindPattern p1 v2 >=> bindPattern p2 v2
+bindPattern (PChar n) (VChar m) =
+  if n == m then Just . id else const Nothing
+bindPattern (PPair p1 p2) (VVariant _ vs) =
+  bindPattern p1 (vs!!0) >=> bindPattern p2 (vs!!1)
 bindPattern (PConstructor x ps) (VVariant y vs) =
   if x == y then
     \e -> foldM (\acc (p, v) -> bindPattern p v acc) e $ zip ps vs
   else const Nothing
+bindPattern (PRecord pfields) (VRecord vfields) =
+  \e -> 
+    foldM (\acc (x, p) ->
+              case assocGet x vfields of
+                Just v ->
+                  bindPattern p v acc
+                Nothing ->
+                  Nothing) e pfields
 bindPattern _ _ = const Nothing
 
 

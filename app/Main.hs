@@ -4,7 +4,7 @@ import Control.Monad
 import System.Environment (getArgs)
 -- import System.IO (hGetContents)
 import Ast
-import Core (genTypeVars, unify, FreeTyVars(..), TySubstable(..))
+import Core (genTypeVars, unify, FreeTyVars(..), TySubstable(..), normalize)
 import Interp (interpProg)
 import Parser (parseProg)
 import Preprocessor (importLines, substImports)
@@ -34,17 +34,22 @@ main = do
   -- let ast = parseAndTycheck src'
   -- putStrLn $ show ast
 
-  -- let ty1 = TyVar False (Id "a")
+  -- let tyx = TyVar False (Id "x")
+  -- let tyy = TyVar False (Id "y")
+  -- let typair = TyVariant (Id "Pair") [tyx, tyy] []
+  -- let ty1 = TyAbs (Id "y") KStar typair
+  -- let ty2 = TyAbs (Id "x") KStar ty1
+  -- let ty3 = TyApp (TyApp ty2 TyBool) TyInt
+  -- putStrLn $ show ty3
+  -- putStrLn $ show $ normalize ty3
+
+  -- putStrLn $ show $ freetyvars typair
+
   -- let ty2 = TyVar False (Id "b")
   -- let a = freetyvars (tysubst ty1 ty2 (TyPair ty1 ty2))
   -- let b = tysubst ty1 ty2 (freetyvars (TyPair ty1 ty2))
   -- putStrLn $ show a
   -- putStrLn $ show b
-
-  -- let fvs = freetyvars $ TyVar False (Id "a")
-  -- putStrLn $ show fvs
-
-  -- putStrLn $ show $ unify [(TyVar $ Id "a", TyPair TyUnit TyUnit)]
   
   -- Parse and typecheck the final source code.
   -- On success, run the interpreter on the AST.
