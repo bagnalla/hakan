@@ -1,6 +1,8 @@
 -- This grammar file is based on the template from
 -- https://github.com/dagit/happy-plus-alex
 
+-- TODO: syntax sugar for n-tuples (terms and patterns).
+
 {
 {-# OPTIONS -w #-}
 module Parser( parseProg ) where
@@ -25,6 +27,7 @@ import Ast (data_of_term)
   int          { Token $$ TokenIntTy }
   char         { Token $$ TokenCharTy }
   unit         { Token $$ TokenUnitTy }
+  refty        { Token $$ TokenRefTy }
   tt           { Token $$ TokenTT }
   true         { Token $$ (TokenBool True) }
   false        { Token $$ (TokenBool False) }
@@ -48,8 +51,9 @@ import Ast (data_of_term)
   of           { Token $$ TokenOf }
   ref          { Token $$ TokenRef }
   let          { Token $$ TokenLet }
-  letrec       { Token $$ TokenLetrec }
-  val          { Token $$ TokenVal }
+  def          { Token $$ TokenDef }
+--  letrec       { Token $$ TokenLetrec }
+--  val          { Token $$ TokenVal }
   in           { Token $$ TokenIn }
   '!'          { Token $$ TokenBang }
   ":="         { Token $$ TokenUpdate }
@@ -96,6 +100,10 @@ import Ast (data_of_term)
   as           { Token $$ TokenAs }
   end           { Token $$ TokenEnd }
   record       { Token $$ TokenRecord }
+  assert       { Token $$ TokenAssert }
+  pure         { Token $$ TokenPure }
+  impure       { Token $$ TokenImpure }
+  io           { Token $$ TokenIO }
   -- eof          { Token $$ TokenEOF }
 
 %nonassoc ':'
@@ -111,7 +119,7 @@ import Ast (data_of_term)
 %left '*' '/' '×' '⊗'
 %left '∘'
 %left '▵' '▿'
-%nonassoc fix true false intVal id unit bool int char
+%nonassoc fix true false intVal id unit bool int char refty
 %left APP
 %nonassoc UNOP
 %nonassoc '-'
@@ -150,6 +158,7 @@ Type :
   | Type '+' Type
     { Ast.TyApp (Ast.TyApp (Ast.TyName $ Id "Sum") $1) $3 }
   | Type '?' { Ast.TyApp (Ast.TyName $ Id "Option") $1 }
+  | refty Type { Ast.TyRef $2 }
 
 -- The only reason we duplicate the grammar for types is so that type
 -- variables in a type declaration are marked as rigid. There is probably
@@ -179,6 +188,7 @@ DeclType :
   | DeclType '+' DeclType
     { Ast.TyApp (Ast.TyApp (Ast.TyName $ Id "Sum") $1) $3 }
   | DeclType '?' { Ast.TyApp (Ast.TyName $ Id "Option") $1 }
+  | refty DeclType { Ast.TyRef $2 }
 
 Id :
   '_' { Token $1 (TokenId (Id "_")) }
@@ -200,13 +210,7 @@ Term :
   | Term '*' Term { Ast.TmBinop $2 Ast.BMult $1 $3 }
   | Term '/' Term { Ast.TmBinop $2 Ast.BDiv $1 $3 }
   | Term '<' Term { Ast.TmBinop $2 Ast.BLt $1 $3 }
-  | Term "<=" Term { Ast.TmBinop $2 Ast.BLe $1 $3 }
-  | Term '>' Term { Ast.TmBinop $2 Ast.BGt $1 $3 }
-  | Term ">=" Term { Ast.TmBinop $2 Ast.BGe $1 $3 }
-  | Term '=' Term { Ast.TmBinop $2 Ast.BEq $1 $3 }
-  | Term "<>" Term { Ast.TmBinop $2 Ast.BNeq $1 $3 }
-  | Term "&&" Term { Ast.TmBinop $2 Ast.BAnd $1 $3 }
-  | Term "||" Term { Ast.TmBinop $2 Ast.BOr $1 $3 }
+  | BExp { $1 }
   | Term ":=" Term { Ast.TmBinop $2 Ast.BUpdate $1 $3 }
   | Term '∘' Term
     { Ast.TmApp $2 (Ast.TmApp $2  (Ast.TmVar $2 (Id "compose")) $3) $1 }
@@ -218,6 +222,15 @@ Term :
     { Ast.TmApp $2 (Ast.TmApp $2 (Ast.TmVar $2 (Id "tuple")) $1) $3 }
 --  | destruct Term as barlist(Case) end { Ast.TmMatch $1 $2 $4 }
   | destruct Term as barlist(Case) { Ast.TmMatch $1 $2 $4 }
+
+BExp :
+  Term "<=" Term { Ast.TmBinop $2 Ast.BLe $1 $3 }
+  | Term '>' Term { Ast.TmBinop $2 Ast.BGt $1 $3 }
+  | Term ">=" Term { Ast.TmBinop $2 Ast.BGe $1 $3 }
+  | Term '=' Term { Ast.TmBinop $2 Ast.BEq $1 $3 }
+  | Term "<>" Term { Ast.TmBinop $2 Ast.BNeq $1 $3 }
+  | Term "&&" Term { Ast.TmBinop $2 Ast.BAnd $1 $3 }
+  | Term "||" Term { Ast.TmBinop $2 Ast.BOr $1 $3 }
 
 AppTerm :
   ATerm { $1 }
@@ -291,9 +304,10 @@ Ctor :
                                        Nothing -> []) }
 
 Command :
-  val id TyDeclBinder { Ast.CDecl (infoFromToken $2) (idFromToken $2) $3 }
-  | let id Binder { Ast.CLet (infoFromToken $2) (idFromToken $2) $3 }
-  | letrec id Binder {
+--  val id TyDeclBinder { Ast.CDecl (infoFromToken $2) (idFromToken $2) $3 }
+  pure id TyDeclBinder { Ast.CDecl (infoFromToken $2) (idFromToken $2) $3 }
+--  | let id Binder { Ast.CLet (infoFromToken $2) (idFromToken $2) $3 }
+  | def id Binder {
       let (fi, x) = (infoFromToken $2, idFromToken $2) in
         Ast.CLet fi x (Ast.TmUnop fi Ast.UFix (Ast.TmAbs fi x
                  (Ast.TyVar False (Id "")) $3)) }
@@ -303,6 +317,8 @@ Command :
       { Ast.CData $1 (idFromToken $2) (map idFromToken $3) $5 }
   | record capid list(id) '=' '{' seplist(FieldDecl, ',') '}'
       { Ast.CRecord $1 (idFromToken $2) (map idFromToken $3) $6 }
+  | assert BExp { Ast.CAssert $1 $2 }
+  | check Term { Ast.CCheck $1 $2 }
 
 FieldDecl :
   id TyBinder { (idFromToken $1, $2) }

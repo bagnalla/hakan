@@ -1,0 +1,32 @@
+∃ base
+
+record Person a =
+  { name : [Char]
+  , age : Int
+  , metadata : a }
+
+pure p1 : Person Int
+def p1 = { name = Cons 'a' Nil
+         , age = 21
+         , metadata = 123 }
+
+pure p2 : Person Int
+def p2 = { name = Cons 'b' Nil
+         , age = 25
+         , metadata = 45 }
+
+pure people : [Person Int]
+-- def people = Nil
+def people = Cons p1 (Cons p2 Nil)
+
+-- 〚 tt 〛
+
+pure compose : (a → b) → (b → c) → a → c
+def compose = λf. λg. λx. g (f x)
+
+〚 length people 〛
+〚 (head ∘ tail) people 〛
+
+check compose
+
+run (head ∘ tail) people

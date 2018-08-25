@@ -1,0 +1,9 @@
+
+-- data Option a =
+--   | None
+--   | Some a
+
+-- 〚 Some 〛
+
+data Test a =
+  | Test (Ref a)

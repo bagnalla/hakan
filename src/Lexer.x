@@ -25,6 +25,7 @@ $capital = [A-Z]
 tokens :-
 
   "#".*                         ;
+  "--".*                         ;
   $white+                       ;
   "->"                          { lex' TokenArrow }
   \→                            { lex' TokenArrow }
@@ -35,6 +36,7 @@ tokens :-
   \ℤ                            { lex' TokenIntTy }
   Char                          { lex' TokenCharTy }
   Unit                          { lex' TokenUnitTy }
+  Ref                           { lex' TokenRefTy }
   tt                            { lex' TokenTT }
   true                          { lex' $ TokenBool True }
   \⊤                            { lex' $ TokenBool True }
@@ -46,6 +48,7 @@ tokens :-
   then                          { lex' TokenThen }
   else                          { lex' TokenElse }
   evaluate                      { lex' TokenEval }
+  run                           { lex' TokenEval }
   check                         { lex' TokenCheck }
 --  fst                           { lex' TokenFst }
 --  snd                           { lex' TokenSnd }
@@ -59,8 +62,9 @@ tokens :-
   of                            { lex' TokenOf }
   ref                           { lex' TokenRef }
   let                           { lex' TokenLet }
-  letrec                        { lex' TokenLetrec }
-  val                           { lex' TokenVal }
+--  letrec                        { lex' TokenLetrec }
+  def                           { lex' TokenDef }
+--  val                           { lex' TokenVal }
   in                            { lex' TokenIn }
   ":="                          { lex' TokenUpdate }
   \←                            { lex' TokenUpdate }
@@ -112,6 +116,10 @@ tokens :-
   as                            { lex' TokenAs }
   end                           { lex' TokenEnd }
   record                        { lex' TokenRecord }
+  assert                        { lex' TokenAssert }
+  pure                          { lex' TokenPure }
+  impure                        { lex' TokenImpure }
+  io                            { lex' TokenIO }
   -- eof                        { lex' TokenEOF }
   \'.\'                         { lex (TokenChar . head . tail) }
   $capital [$alpha $digit \_ \']* { lex (TokenCapId . Id) }
@@ -148,6 +156,7 @@ data TokenClass =
   | TokenIntTy
   | TokenCharTy
   | TokenUnitTy
+  | TokenRefTy
   | TokenTT
   | TokenArrow
   | TokenDot
@@ -187,8 +196,9 @@ data TokenClass =
   | TokenBang
   | TokenUpdate
   | TokenLet
-  | TokenLetrec
-  | TokenVal
+  | TokenDef
+--  | TokenLetrec
+--  | TokenVal
   | TokenIn
   | TokenCompose
   | TokenLLBracket
@@ -216,6 +226,10 @@ data TokenClass =
   | TokenEnd
   | TokenRecord
   | TokenQuestion
+  | TokenAssert
+  | TokenPure
+  | TokenImpure
+  | TokenIO
     deriving (Eq,Show)
 
 -- For nice parser error messages.
@@ -233,6 +247,7 @@ unLex TokenBoolTy          = "Bool"
 unLex TokenIntTy           = "Int"
 unLex TokenCharTy          = "Char"
 unLex TokenUnitTy          = "Unit"
+unLex TokenRefTy           = "Ref"
 unLex TokenTT              = "tt"
 unLex TokenArrow           = "->"
 unLex TokenDot             = "."
@@ -272,8 +287,9 @@ unLex TokenRef             = "ref"
 unLex TokenBang            = "!"
 unLex TokenUpdate          = ":="
 unLex TokenLet             = "let"
-unLex TokenLetrec          = "letrec"
-unLex TokenVal             = "val"
+unLex TokenDef             = "def"
+--unLex TokenLetrec          = "letrec"
+--unLex TokenVal             = "val"
 unLex TokenIn              = "in"
 unLex TokenCompose         = "∘"
 unLex TokenLLBracket       = "〚"
@@ -297,6 +313,10 @@ unLex TokenAs              = "as"
 unLex TokenEnd             = "end"
 unLex TokenRecord          = "record"
 unLex TokenQuestion        = "?"
+unLex TokenAssert          = "assert"
+unLex TokenPure            = "pure"
+unLex TokenImpure          = "impure"
+unLex TokenIO              = "io"
 unLex TokenEOF             = "<EOF>"
 
 alexEOF :: Alex Token

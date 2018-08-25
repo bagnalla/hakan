@@ -4,7 +4,7 @@ import Control.Monad
 import System.Environment (getArgs)
 -- import System.IO (hGetContents)
 import Ast
-import Core (genTypeVars, unify, FreeTyVars(..), TySubstable(..), normalize)
+import Core (genTypeVars, unify, FreeTyVars(..), TySubstable(..))
 import Interp (interpProg)
 import Parser (parseProg)
 import Preprocessor (importLines, substImports)
@@ -25,7 +25,7 @@ main = do
   -- Map imports to their corresponding source code
   import_srcs <- mapM
     (\(lnum, imps) ->
-        sequence (lnum, (mapM (readFile . (++ ".cf")) imps)))
+        sequence (lnum, (mapM (readFile . (++ ".hk")) imps)))
     imports
 
   -- Replace imports by inlining their source code
@@ -53,22 +53,20 @@ main = do
   
   -- Parse and typecheck the final source code.
   -- On success, run the interpreter on the AST.
-  let result = case parseAndTycheck src' of
-                 Left s -> error s
-                 Right p' -> interpProg p'
+  result <- case parseAndTycheck src' of
+              Left s -> error s
+              Right (p', warnings) -> do
+                forM_ warnings putStrLn
+                return $ interpProg p'
+
+  -- let result = parseGenOnly src'
 
   -- Print the result
   putStrLn $ show result
 
 parseOnly f = parseProg "" f
 
-parseGenOnly f = do
-  p <- parseProg "" f
-  let p' = genTypeVars p
-  return p'
+parseGenOnly = fmap genTypeVars . parseProg ""
 
-parseAndTycheck f = do
-  p <- parseProg "" f
-  let p' = genTypeVars p
-  p'' <- runTycheck (tycheckProg p')
-  return p''
+parseAndTycheck =
+  parseProg "" >=> runTycheck . tycheckProg . genTypeVars

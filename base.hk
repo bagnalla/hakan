@@ -1,0 +1,73 @@
+
+data Option a =
+  | None
+  | Some a
+
+data Pair a b =
+  | Pair a b
+
+data Sum a b =
+  | Inl a
+  | Inr b
+
+pure proj1 : a × b → a
+def proj1 = λ p.
+  destruct p as
+  | (x, _) → x
+
+pure proj2 : a × b → b
+def proj2 = λ p.
+  destruct p as
+  | (_, y) → y
+
+data List a =
+  | Nil
+  | Cons a (List a)
+
+pure isnil : [a] → Bool
+def isnil = λ l.
+  destruct l as
+  | Nil → ⊤
+  | _   → ⊥
+
+pure head : [a] → a?
+def head = λ l.
+  destruct l as
+  | Nil      → None
+  | Cons x _ → Some x
+
+pure tail : [a] → [a]
+def tail = λ l.
+  destruct l as 
+  | Nil       → Nil
+  | Cons _ l' → l'
+
+pure app : [a] → [a] → [a]
+def app = λ l1. λ l2.
+  destruct l1 as 
+  | Nil → l2
+  | Cons x l1' → Cons x (app l1' l2)
+
+pure concat : [[a]] → [a]
+def concat = λ l.
+  destruct l as
+  | Nil → Nil
+  | Cons x l' → app x (concat l')
+
+pure length : [a] → ℤ
+def length = λl.
+  destruct l as
+  | Nil       → 0
+  | Cons _ l' → 1 + length l'
+
+pure rev : [a] → [a]
+def rev = λ l.
+  destruct l as
+  | Nil → Nil
+  | Cons x l' → app (rev l') (Cons x Nil)
+
+pure map : (a → b) → [a] → [b]
+def map = λ f. λ l.
+  destruct l as
+  | Nil → Nil
+  | Cons x l' → Cons (f x) (map f l')

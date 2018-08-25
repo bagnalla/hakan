@@ -10,8 +10,14 @@
 data Pair a b =
   | Pair a b
 
-val tuple : (a → b) → (a → c) → a → b × c
-let tuple = λf. λg. λx. (f x, g x)
+# val tuple : (a → b) → (a → c) → a → b × c
+# let tuple = λf. λg. λx. (f x, g x)
+
+val proj1 : a × b → a
+let proj1 = λ p.
+  destruct p as
+  | (x, _) → x
+
 
 # val tuple : b × c
 

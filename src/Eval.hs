@@ -93,13 +93,13 @@ eval (TmAbs _ nm ty tm) = do
   ctx <- ask -- close over the current environment
   return $ VClos ctx nm tm
 
-eval (TmApp _ t1 t2) =
-  debugPrint "eval TmApp" $ do
+eval (TmApp _ t1 t2) = do
+  -- debugPrint "eval TmApp" $ do
   v1 <- eval t1
   v2 <- eval t2
   case v1 of
     VClos clos nm body ->
-      debugPrint ("v1: " ++ show v1) $
+      -- debugPrint ("v1: " ++ show v1) $
       -- Force call-by-value order with seq
       seq v2 $ local (const $ extendEnv nm v2 clos) $ eval body
     _ -> evalError $ "eval: " ++ show v1 ++ " isn't a closure"

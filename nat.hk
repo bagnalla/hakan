@@ -1,0 +1,98 @@
+
+# Peano encoding of natural numbers.
+data Nat =
+  | Zero
+  | Succ Nat
+
+pure one : Nat
+def one = Succ Zero
+
+pure two : Nat
+def two = Succ one
+
+pure pred : Nat → Nat
+def pred = λ n.
+  destruct n as 
+  | Zero → Zero
+  | Succ n' → n'
+
+pure iszero : Nat → Bool
+def iszero = λ n.
+  destruct n as
+  | Zero → ⊤
+  | Succ _ → ⊥
+
+pure equal : Nat → Nat → Bool
+def equal = λ n. λ m.
+  if iszero n then iszero m else
+  ¬ iszero m && equal (pred n) (pred m)
+
+pure le : Nat → Nat → Bool
+def le = λ n. λ m.
+  if iszero n then ⊤ else
+  le (pred n) (pred m)
+
+pure lt : Nat → Nat → Bool
+def lt = λ n. λ m. le n m && ¬ equal n m
+
+pure ge : Nat → Nat → Bool
+def ge = λ n. λ m. ¬ le n m
+
+pure gt : Nat → Nat → Bool
+def gt = λ n. λ m. ¬ lt n m
+
+pure plus : Nat → Nat → Nat
+def plus = λ n. λ m.
+  destruct n as 
+  | Zero → m
+  | Succ n' → Succ (plus n' m)
+
+pure minus : Nat -> Nat -> Nat
+def minus = λ n. λ m.
+  destruct m as
+  | Zero -> n
+  | Succ m' -> minus (pred n) m'
+
+pure mult : Nat → Nat → Nat
+def mult = λ n. λ m.
+  destruct n as 
+  | Zero → Zero
+  | Succ n' → plus (mult n' m) m
+
+pure div : Nat → Nat → Nat
+def div = λ n. λ m.
+  if iszero m || lt n m then Zero
+  else Succ (div (minus n m) m)
+  
+# pow
+pure pow : Nat -> Nat -> Nat
+def pow = λ n. λ m.
+  destruct m as
+  | Zero -> one
+  | Succ m' -> if iszero m' then n else mult n (pow n m')
+
+# fact
+pure fact : Nat -> Nat
+def fact = λ n.
+  destruct n as
+  | Zero -> one
+  | Succ n' -> mult n (fact n')
+
+pure compose : (a → b) → (b → c) → a → c
+def compose = λf. λg. λx. g (f x)
+
+pure natOfInt : ℤ → Nat
+def natOfInt = λ i.
+  -- if i <= 0 then Zero else Succ (natOfInt (i-1))
+  if i <= 0 then Zero else (Succ ∘ natOfInt) (i-1)
+
+pure intOfNat : Nat → ℤ
+def intOfNat = λ n.
+  destruct n as
+  | Zero → 0
+  | Succ n' → 1 + intOfNat n'
+
+-- 〚 intOfNat (plus (natOfInt 113) (natOfInt 150)) 〛
+-- 〚 intOfNat (mult (natOfInt 11) (natOfInt 50)) 〛
+# This div computation isn't right for some reason.
+〚 intOfNat (div (natOfInt 1000) (pow (natOfInt 2) (fact (natOfInt 3)))) 〛

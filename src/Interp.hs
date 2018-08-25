@@ -12,10 +12,11 @@ import Symtab (Symtab, Id(..), empty, add, fold)
 import qualified Symtab (get)
 import Eval (eval, Value(..), Env(..))
 
-type InterpM a = WriterT [String] (ReaderT Env (StateT (Int, Env) Identity)) a
+type InterpM a =
+  WriterT [String] (ReaderT Env (StateT (Int, Env) Identity)) a
 
 initEnv = Env empty
-initState = (0, Env empty)
+initState = (0, initEnv)
 
 -- | Interpret a program by interpreting its commands in sequence.
 -- For now since we have no I/O, we can build up a list of strings to
@@ -28,11 +29,13 @@ interpProg =
 interpCommands :: [Command ()] -> InterpM Value
 interpCommands [] = return VUnit
 interpCommands (CDecl _ _ _ : cs) = interpCommands cs
+interpCommands (CCheck _ _ : cs) = interpCommands cs
 interpCommands (CLet _ nm tm : cs) = do
   v <- eval tm
   local (Env . add nm v . unEnv) $ interpCommands cs
 interpCommands (CEval _ tm : []) = eval tm
 interpCommands (CEval _ tm : cs) = eval tm >> interpCommands cs
+
 -- Build constructor functions and add them to the environment.
 interpCommands (CData _ nm _ ctors : cs) = do
   funs <-
@@ -43,7 +46,7 @@ interpCommands (CData _ nm _ ctors : cs) = do
              return $ (x, val)) ctors
   local (\(Env e) -> Env $ foldl (\acc (x, f) -> add x f acc) e funs) $
     interpCommands cs
-
+    
 -- Build field projection functions and add them to the environment. 
 interpCommands (CRecord _ nm _ fields : cs) = do
   funs <- mapM (\(x, ty) -> do
@@ -54,3 +57,11 @@ interpCommands (CRecord _ nm _ fields : cs) = do
                    return (x, val)) fields
   local (\(Env e) -> Env $ foldl (\acc (x, f) -> add x f acc) e funs) $
     interpCommands cs
+
+-- Check that an assertion is true.
+interpCommands (CAssert _ tm : cs) = do
+  v <- eval tm
+  case v of
+    VBool True -> interpCommands cs
+    VBool False -> error $ "Assertion failed: " ++ show tm
+    _ -> error "Interp: bad assertion"

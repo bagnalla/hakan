@@ -1,0 +1,71 @@
+∃ base
+
+pure nand : Bool → Bool → Bool
+def nand = λx. λy. ¬ (x ∧ y)
+
+pure xor : Bool → Bool → Bool
+def xor = λx. λy. if x then ¬ y else y
+
+pure xnor : Bool → Bool → Bool
+def xnor = λx. λy. ¬ (xor x y)
+
+pure succ : ℤ → ℤ
+def succ = λx. x + 1
+
+pure pred : ℤ → ℤ
+def pred = λx. x - 1
+
+-- pure proj1 : a × b → a
+-- def proj1 = λp. p₁
+
+-- pure proj2 : a × b → b
+-- def proj2 = λp. p₂
+
+pure double : a → a × a
+def double = λx. (x, x)
+
+# Force evaluation of the argument and return unit.
+pure seq : a → Unit
+def seq = λ_. tt
+
+# Function composition.
+pure compose : (a → b) → (b → c) → a → c
+def compose = λf. λg. λx. g (f x)
+
+# Function tupling.
+pure tuple : (a → b) → (a → c) → a → b × c
+def tuple = λf. λg. λx. (f x, g x)
+
+pure pair_fun : (a → c) → (b → d) → a × b → c × d
+def pair_fun = λf. λg. λp. (f p₁, g p₂)
+
+# This should be equivalent to the above.
+-- def pair_fun = λf. λg. ⟨f ∘ π₁, g ∘ π₂⟩
+
+# Function cotupling.
+pure cotuple : (a → c) → (b → c) → a + b → c
+def cotuple = λf. λg. λs.
+  destruct s as
+  | Inl x → f x
+  | Inr y → g y
+
+pure curry : (a × b → c) → a → b → c
+def curry = λf. λx. λy. f (x, y)
+
+pure uncurry : (a → b → c) → a × b → c
+def uncurry = λf. λp. f p₁ p₂
+
+pure epure : (a → b) → a → b
+def epure = λf. λx. f x
+
+# Exponentiation
+pure pow : ℤ → ℤ → ℤ
+def pow = λn. λm.
+  if m ≤ 0 then 1 else
+  n * pow n (m - 1)
+
+# Factorial
+pure fact : ℤ → ℤ
+def fact = λn.
+  if n ≤ 0 then 1 else
+  n * fact (n - 1)

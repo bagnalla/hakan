@@ -11,10 +11,10 @@ module Core (
   TypeSubst,
   unify,
   tysubstAll,
+  tysubstAll',
   idOfType,
   isTyVar,
   fixTy,
-  normalize,
   kindCheck,
   tysubst'
   ) where
@@ -120,6 +120,9 @@ unify ((s, t) : xs) =
 -------------------------------
 -- | Type variable substitution
 
+-- The boolean determines whether to do capture avoiding substitution
+-- or not. Not sure if it's necessary anymore since we stopped
+-- explicitly tying the knot on recursive types.
 class TySubstable a where
   tysubst :: Bool -> Type -> Type -> a -> a
 
@@ -169,12 +172,18 @@ instance (TySubstable β) => TySubstable (Symtab β) where
   tysubst b s t = Symtab.map (tysubst b s t)
 
 tysubst' :: TySubstable a => Type -> Type -> a -> a
-tysubst' = tysubst True
+tysubst' =
+  debugPrint "tysubst'" $
+  tysubst True
 
 -- Fold over a list of individual substitutions on an instance of
 -- TySubstClass.
-tysubstAll :: TySubstable a => TypeSubst -> a -> a
-tysubstAll tsubst x =
+tysubstAll :: TySubstable a => Bool -> TypeSubst -> a -> a
+tysubstAll b tsubst x =
+  foldl (\acc (s, t) -> tysubst b s t acc) x tsubst
+
+tysubstAll' :: TySubstable a => TypeSubst -> a -> a
+tysubstAll' tsubst x =
   foldl (\acc (s, t) -> tysubst' s t acc) x tsubst
 
 
@@ -193,49 +202,28 @@ kindCheck (TyApp s t) = do
 kindCheck _ = Just KStar
 
 
------------------------
--- | Type normalization
-
--- I think it's fine to use the recursion scheme for this.
-normalize :: Type -> Type
-normalize = typeRec $
-  \ty -> case ty of
-    TyApp (TyAbs x _ t) s -> tysubst' s (TyVar False x) t
-    _ -> ty
-
 -------------------------
 -- | Free type variables
 
 class FreeTyVars a where
   freetyvars :: a -> [Type]
 
--- NOTE: remember to update this when extending the language types,
--- since it isn't using any of the recursion schemes or catamorphisms.
+instance FreeTyVars a => FreeTyVars [a] where
+  freetyvars = nub . concat . fmap freetyvars
 
--- This isn't the most satisfying solution... we just use a depth
--- bound to avoid infinite cycles in recursive types. It would be nice
--- to somehow determine a minimum (or approximately minimum) value of
--- d necessary to sufficiently search a type. The current solution is
--- 1) inefficient, and 2) potentially unsound for very large types.
--- I think it should be not too difficult to compute a sufficient
--- value for d.
+-- This relies on the fact that well-formed named types never have
+-- free type variables, and that the argument type is not infinite (do
+-- not normalize types before computing their free type variables).
 instance FreeTyVars Type where
-  freetyvars = nub . go [] 20
-    where
-      go :: [Type] -> Int -> Type -> [Type]
-      go _ d _ | d <= 0 = []
-      go xs d ty@(TyVar _ _) = if ty `elem` xs then [] else [ty]
-      go xs d (TyAbs x _ s) = go (TyVar False x : xs) (d-1) s
-      go xs d (TyApp s t) = go xs (d-1) s ++ go xs (d-1) t
-      go xs d (TyArrow s t) = go xs (d-1) s ++ go xs (d-1) t
-      go xs d (TyRef s) = go xs (d-1) s
-      go xs d (TyVariant _ tyargs ctors) =
-        concat (go xs (d-1) <$> tyargs) ++
-        concat (go xs (d-1) <$> (concat $ snd $ unzip ctors))
-      go xs d (TyRecord _ tyargs fields) =
-        concat (go xs (d-1) <$> tyargs) ++
-        concat (go xs (d-1) <$> (snd $ unzip fields))
-      go _ _ _ = []
+  freetyvars = nub . flip evalState [] .
+    (typeRec2M $
+     \ty -> case ty of
+              ty@(TyVar _ _) -> do
+                xs <- get
+                return $ if ty `elem` xs then [] else [ty]
+              ty@(TyAbs x _ _) ->
+                modify ((:) $ TyVar False x) >> return []
+              _ -> return [])
 
 ---------------------------------------------------------------
 -- | Fill in omitted typed annotations with auto-generated type
@@ -273,13 +261,15 @@ genTypeVars p =
 -- | Recursive type stuff
 
 abstractTy :: Id -> Type -> Type -> Type
-abstractTy x ty s = tysubst False s (TyVar False x) ty
+-- abstractTy x ty s = tysubst False s (TyVar False x) ty
+abstractTy x ty s = tysubst' s (TyVar False x) ty
 
 abstractTys :: [Id] -> [Type] -> [Type] -> [Type]
 abstractTys xs tys tys' =
   Prelude.map (\ty -> foldl f ty (zip xs tys')) tys
   where f acc (x, ty) =
-          tysubst False (TyVar False x) ty acc
+          -- tysubst False (TyVar False x) ty acc
+          tysubst' (TyVar False x) ty acc
 
 fixTy :: Id -> Type -> Type
 fixTy x ty = fix (abstractTy x ty)

@@ -1,3 +1,5 @@
+{-# LANGUAGE FlexibleContexts #-}
+
 -- | This module contains the typechecker. It is a function from
 -- untyped ASTs with line/column number metadata to ASTs with type
 -- metadata.
@@ -10,21 +12,22 @@ import Control.Monad.Except
 import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State
+import Control.Monad.Writer
 import Data.Bifunctor
-import Data.List (unzip4)
-import Data.Maybe (fromJust)
+import Data.List (nub, unzip4)
 
 import Ast
 import Core (FreeTyVars(..), ConstrSet, TypeSubst, unify, idOfType,
-             TySubstable(..), tysubstAll, fixTy, normalize, kindCheck,
+             TySubstable(..), tysubstAll, tysubstAll', fixTy, kindCheck,
              tysubst')
 import Gensym (nextSym, nextSym2, nextSym3)
 import Parser
-import Symtab (Symtab, Id(..), empty, add, get, exists, assocGet)
+import Symtab (Symtab, Id(..), add, get, assocGet)
+import Context
 import Util
 
 -- TODO: Type synonyms and/or newtypes at some point.
--- TODO: add a newtype for type schemes
+
 
 ---------------------------------------------
 -- | The type of metadata for typechecked terms.
@@ -35,7 +38,10 @@ newtype TyData = TyData { unTyData :: Type }
 mkData ty = TyData ty
 
 mapTyData :: (Type -> Type) -> TyData -> TyData
-mapTyData f (TyData ty) = TyData (f ty)
+mapTyData f (TyData ty) = TyData $ f ty
+
+mapTyDataM :: Functor f => (Type -> f Type) -> TyData -> f TyData
+mapTyDataM g (TyData ty) = TyData <$> g ty
 
 -- TyData can receive type substitution
 instance TySubstable TyData where
@@ -45,40 +51,15 @@ instance TySubstable TyData where
 -----------------
 -- | Typechecker
 
-data Context =
-  Context {
-  -- explicit type declarations
-  ctx_decls :: Symtab Type,
-  -- regular typing context
-  ctx_gamma :: Symtab Type,
-  -- user-defined datatypes
-  ctx_datatypes :: Symtab Type,
-  -- map constructor names to their datatypes
-  ctx_ctors :: Symtab Type,
-  -- map field names to their record types
-  ctx_fields :: Symtab Type
-  }
-  deriving Show
-
-initCtx :: Context
-initCtx = Context { ctx_decls = empty
-                  , ctx_gamma = empty
-                  , ctx_datatypes = empty
-                  , ctx_ctors = empty
-                  , ctx_fields = empty }
-
-updDecls :: (Symtab Type -> Symtab Type) -> Context -> Context
-updDecls f ctx = ctx { ctx_decls = f $ ctx_decls ctx }
-
-updGamma :: (Symtab Type -> Symtab Type) -> Context -> Context
-updGamma f ctx = ctx { ctx_gamma = f $ ctx_gamma ctx }
-
 type TycheckM a =
-  ReaderT Context (ExceptT String (StateT Int Identity)) a
+  WriterT [String]
+  (ReaderT Context
+   (ExceptT String
+    (StateT Int Identity))) a
 
-runTycheck :: TycheckM a -> Either String a
-runTycheck t =
-  fst $ runIdentity (runStateT (runExceptT (runReaderT t initCtx)) 0)
+runTycheck :: TycheckM a -> Either String (a, [String])
+runTycheck = fst . runIdentity . flip runStateT 0 . runExceptT .
+             flip runReaderT initCtx . runWriterT
 
 unifyError :: Show α => Type -> Type -> α -> TycheckM b
 unifyError s t fi =
@@ -87,8 +68,9 @@ unifyError s t fi =
 
 tryUnify :: Show α => α -> ConstrSet -> (TypeSubst -> TycheckM a) ->
             TycheckM a
-tryUnify fi c f =
-  case unify c of
+tryUnify fi c f = do
+  η <- asks ctx_datatypes
+  case unify $ bimap (normalize fi η) (normalize fi η) <$> c of
     Left (s, t) -> unifyError s t fi
     Right tsubst ->
       f tsubst
@@ -96,11 +78,10 @@ tryUnify fi c f =
 tycheckTerm :: Show α => Term α -> TycheckM (Term TyData, ConstrSet)
 tycheckTerm (TmVar fi x) =
   debugPrint "TmVar" $ do
-  -- 'asks' takes a function mapping the context to a value
   tyscheme <- asks $ Symtab.get x . ctx_gamma
   case tyscheme of
     Just tyscheme' -> do
-      ty <- instantiate_tyscheme tyscheme'
+      ty <- instantiate_tyscheme fi tyscheme'
       debugPrint ("var nm: " ++ show x) $
         debugPrint ("var tyscheme: " ++ show tyscheme') $
         debugPrint ("var ty : " ++ show ty ++ "\n") $ do
@@ -111,8 +92,8 @@ tycheckTerm (TmVar fi x) =
 
 tycheckTerm (TmAbs fi x ty tm) =
   debugPrint "TmAbs" $ do
-  ty' <- normalize <$> resolveTyNames fi ty >>= wellKinded
-  (tm', c) <- local (updGamma $ add x ty') $
+  ty' <- wellKinded fi ty
+  (tm', c) <- local (updGamma $ add x $ mkTypeScheme [] ty') $
               tycheckTerm tm
   let ty'' = ty_of_term tm'
   debugPrint ("abs nm: " ++ show x) $
@@ -124,13 +105,11 @@ tycheckTerm (TmAbs fi x ty tm) =
     y <- nextSym "?Y_"
     let tyy = TyVar False (Id y)
     let c' = c ++ [(tyy, TyArrow ty' ty'')]
-    -- debugPrint ("abs c: " ++ show c') $
-    debugPrint "abs c: " $
+    debugPrint ("abs c: " ++ show c') $
       tryUnify fi c' $
       \tsubst ->
-        -- debugPrint ("abs tsubst: " ++ show tsubst ++ "\n") $
-        debugPrint "abs tsubst\n" $
-        return (tysubstAll tsubst $
+        debugPrint ("abs tsubst: " ++ show tsubst ++ "\n") $
+        return (tysubstAll' tsubst $
                 TmAbs (mkData tyy) x ty' tm', c')
   
 tycheckTerm (TmApp fi t1 t2) =
@@ -150,7 +129,7 @@ tycheckTerm (TmApp fi t1 t2) =
       tryUnify fi c $
       \tsubst ->
         debugPrint ("app tsubst: " ++ show tsubst ++ "\n") $
-        return (tysubstAll tsubst $ TmApp (mkData tyx) t1' t2', c)
+        return (tysubstAll' tsubst $ TmApp (mkData tyx) t1' t2', c)
 
 tycheckTerm (TmBool _ b) =
   debugPrint "TmBool\n" $
@@ -165,7 +144,7 @@ tycheckTerm (TmIf fi t1 t2 t3) =
   let c = c1 ++ c2 ++ c3 ++ [(ty1, TyBool), (ty2, ty3)]
   tryUnify fi c $
     \tsubst ->
-      return (tysubstAll tsubst $ TmIf (mkData ty2) t1' t2' t3', c)
+      return (tysubstAll' tsubst $ TmIf (mkData ty2) t1' t2' t3', c)
 
 tycheckTerm (TmUnit _) =
   debugPrint "TmUnit\n" $
@@ -190,13 +169,12 @@ tycheckTerm (TmUnop fi u tm) =
       y <- nextSym "?Y_"
       let tyy = TyVar False (Id y)
       let c' = c ++ [(ty, TyArrow tyy tyy)]
-      -- let c' = c
       debugPrint "UFix 2" $
         tryUnify fi c' $
         \tsubst ->
           debugPrint "UFix tsubst" $
-          return (tysubstAll tsubst $ TmUnop (mkData tyy) u tm', c')
-  
+          return (tysubstAll' tsubst $ TmUnop (mkData tyy) u tm', c')
+
     URef ->
       return (TmUnop (mkData $ TyRef ty) URef tm', c)
 
@@ -206,7 +184,7 @@ tycheckTerm (TmUnop fi u tm) =
       let c' = c ++ [(ty, TyRef tyx)]
       tryUnify fi c' $
         \tsubst ->
-          return (tysubstAll tsubst $ TmUnop (mkData $ tyx) u tm',
+          return (tysubstAll' tsubst $ TmUnop (mkData $ tyx) u tm',
                   c')
 
     -- UMinus, UNot
@@ -218,7 +196,7 @@ tycheckTerm (TmUnop fi u tm) =
                             UNot -> TyBool)]
       tryUnify fi c' $
         \tsubst ->
-          return (tysubstAll tsubst $ TmUnop (mkData ty) u tm', c')
+          return (tysubstAll' tsubst $ TmUnop (mkData ty) u tm', c')
 
 -- When we add floats, we can just introduce a type variable for the
 -- type of the binop term and add a constraint that it's equal to the
@@ -242,15 +220,15 @@ tycheckTerm (TmBinop fi b t1 t2) =
           else []
   tryUnify fi c $
     \tsubst ->
-      return (tysubstAll tsubst $
+      return (tysubstAll' tsubst $
               TmBinop (mkData $ binopType b) b t1' t2', c)
 
 tycheckTerm (TmLet fi x tm1 tm2) =
   debugPrint "TmLet" $ do
   (tm1', c1) <- tycheckTerm tm1
   let ty1 = ty_of_term tm1'
-  tyscheme <- if isValue tm1' then generalize_ty ty1
-              else return ty1
+  let tyscheme = if isValue tm1' then generalize_ty ty1
+                 else mkTypeScheme [] ty1
   debugPrint ("ty: " ++ show ty1) $
     debugPrint ("tyscheme: " ++ show tyscheme ++ "\n") $ do
     (tm2', c2) <- local (updGamma $ add x tyscheme)  $
@@ -258,7 +236,7 @@ tycheckTerm (TmLet fi x tm1 tm2) =
     let c = c1 ++ c2
     tryUnify fi c $
       \tsubst ->
-        return (tysubstAll tsubst $
+        return (tysubstAll' tsubst $
                 TmLet (mkData $ ty_of_term tm2') x tm1' tm2', c)
 
 -- Not sure that we need this since TmVariants don't appear in the
@@ -266,7 +244,7 @@ tycheckTerm (TmLet fi x tm1 tm2) =
 -- interpreter.
 -- tycheckTerm (TmVariant fi x tms) = do
 --   (tms', cs) <- unzip <$> mapM tycheckTerm tms
---   error "TODO"
+--   error ""
 tycheckTerm (TmVariant _ _ _) =
   throwError "unexpected TmVariant in typechecker"
 
@@ -280,33 +258,27 @@ tycheckTerm (TmMatch fi discrim cases) =
                (ty, binds, cs) <- patternType fi p
                (tm', cs') <-
                  local (updGamma $
-                        flip (foldl (\acc (x, t) ->
-                                       add x t acc)) binds)
+                         flip (foldl (\acc (x, t) ->
+                                        add x (mkTypeScheme [] t) acc)) binds)
                  $ tycheckTerm tm
                return (ty, binds, cs ++ cs', tm')) cases
     debugPrint "TmMatch 3\n" $ do
       -- Need a type variable for the overall type, and if there are any
       -- cases then we constrain it to be equal to their type. Also need
       -- to constrain all of the case types to be the same.
-      y <- TyVar False . Id <$> nextSym "_Y?"
+      y <- TyVar False . Id <$> nextSym "?Y_"
       let c = c1 ++ c2 ++ map (\ty ->
-                                 debugPrint ("fds: " ++ show ty) $
+                                 debugPrint ("asdf: " ++ show ty) $
                                  (ty, ty_of_term discrim')) tys ++
               if length cases > 0 then
-                -- debugPrint ("asdf: " ++ (show $ ty_of_term $ tms'!!0)) $
                 (y, ty_of_term $ tms'!!0) :
-                map (\tm ->
-                       -- debugPrint ("asdf': " ++ (show $ ty_of_term tm)) $
-                        (ty_of_term tm,
-                         ty_of_term (tms'!!0))) tms'
+                map (\tm -> (ty_of_term tm, ty_of_term (tms'!!0))) tms'
               else []
-      debugPrint (show c) $
-        debugPrint "TmMatch 4\n" $ do
-        ctx <- ask
+      debugPrint "TmMatch 4\n" $
         tryUnify fi c $
           \tsubst ->
             debugPrint "TmMatch 5\n" $
-            return (tysubstAll tsubst $
+            return (tysubstAll' tsubst $
                      TmMatch (mkData y) discrim' (zip (fst $ unzip cases)
                                                   (tms')),
                     c)
@@ -314,14 +286,16 @@ tycheckTerm (TmMatch fi discrim cases) =
 tycheckTerm (TmRecord fi fields) = do
   let (nms, tms) = unzip fields
   (tms', cs) <- unzip <$> (mapM tycheckTerm tms)
-  γ <- asks ctx_fields
+  ε <- asks ctx_fields
+  η <- asks ctx_datatypes
   recordTy@(TyRecord recordNm _ recordFields) <-
-    instantiate_tyscheme =<< case Symtab.get (nms!!0) γ of
+    normalize fi η <$>
+    (instantiate_tyscheme fi =<< case Symtab.get (nms!!0) ε of
       Just ty ->
         debugPrint (show ty) $
         return ty
       Nothing -> throwError $ "unknown record field name " ++
-                 show (nms!!0) ++ " at " ++ show fi
+                 show (nms!!0) ++ " at " ++ show fi)
   if length nms /= length recordFields then
     throwError $ "wrong number of fields in record " ++
     show recordNm ++ " at " ++ show fi
@@ -335,18 +309,13 @@ tycheckTerm (TmRecord fi fields) = do
     let c = concat cs ++ cs'
     tryUnify fi c $
       \tsubst ->
-        return (tysubstAll tsubst $
+        return (tysubstAll' tsubst $
                 TmRecord (mkData recordTy) (zip nms tms'), c)
 
 tycheckCommand :: Show α => Command α -> TycheckM (Command TyData)
 tycheckCommand (CDecl fi x ty) =
   debugPrint ("CDecl ty: " ++ show ty) $ do
-  ty' <- resolveTyNames fi ty
-  let ty'' = normalize ty'
-  debugPrint ("CDecl ty': " ++ show ty') $
-    debugPrint ("CDecl ty'': " ++ show ty'') $
-    CDecl (mkData TyUnit) x . normalize <$>
-    (resolveTyNames fi ty >>= wellKinded)
+  CDecl (mkData TyUnit) x <$> wellKinded fi ty
 
 tycheckCommand (CLet fi x t) =
   debugPrint "CLet 1" $
@@ -356,23 +325,17 @@ tycheckCommand (CLet fi x t) =
       tryUnify fi c $
       \tsubst ->
         debugPrint ("CLet " ++ show x) $
-        debugPrint ("t': " ++ show t') $
-        debugPrint ("ty: " ++ show (ty_of_term t')) $
-        debugPrint ("c: " ++ show c) $
-        debugPrint ("tsubst: " ++ show tsubst) $
-        debugPrint ("ty': " ++ show (tysubstAll tsubst $ ty_of_term t')) $
-        debugPrint ("ty'': " ++ show (ty_of_term $ tysubstAll tsubst t')
-                     ++ "\n") $
-        return $ CLet (mkData (tysubstAll tsubst $ ty_of_term t')) x $
-        mapTyData normalize . tysubstAll tsubst <$>
-        (termTypeRec normalize $ tysubstAll tsubst t')
+
+        return $ CLet (mkData (tysubstAll' tsubst $ ty_of_term t')) x $
+        tysubstAll' tsubst <$> tysubstAll' tsubst t'
+        
         -- this tysubst on t' isn't doing quite what we want since it
         -- doesn't affect the type metadata... so we also fmap the
         -- tysubst over it. TODO: make it nicer somehow.
 
-tycheckCommand (CEval fi t) = do
-  (t', _) <- tycheckTerm t
-  return $ CEval (mkData (ty_of_term t')) t'
+tycheckCommand (CEval fi tm) = do
+  (tm', _) <- tycheckTerm tm
+  return $ CEval (mkData $ ty_of_term tm') tm'
 
 tycheckCommand (CData fi nm tyvars ctors) =
   return $ CData (mkData TyUnit) nm tyvars ctors
@@ -380,11 +343,16 @@ tycheckCommand (CData fi nm tyvars ctors) =
 tycheckCommand (CRecord fi nm tyvars fields) =
   return $ CRecord (mkData TyUnit) nm tyvars fields
 
-tycheckCommand (CCheck _ _) =
-  throwError "unexpected CCheck in typechecker"
+tycheckCommand (CCheck fi tm) = do
+  (tm', c) <- tycheckTerm tm
+  tryUnify fi c $
+    \_ -> do
+      tell $ [show tm' ++ " : " ++ show (ty_of_term tm')]
+      return $ CCheck (mkData $ ty_of_term tm') tm'
 
-tycheckCommand (CAssert _ _) =
-  throwError "unexpected CAssert in typechecker"
+tycheckCommand (CAssert fi tm) = do
+  (tm', _) <- tycheckTerm tm
+  return $ CAssert (mkData $ ty_of_term tm') tm'
 
 tycheckCommands :: Show α => [Command α] -> TycheckM [Command TyData]
 tycheckCommands [] = return []
@@ -392,84 +360,99 @@ tycheckCommands (com:coms) = do
   com' <- tycheckCommand com
   case com' of
 
+    -- TODO: check for existing declarations of the same name (error).
+    -- It should also probably be an error if a declaration is never
+    -- given a definition.
     CDecl _ x ty -> do
-      let fvs = freetyvars ty
       -- Don't generalize ty so when we pass this to unify_tyschemes
       -- it doesn't replace the rigid type variables with non rigid
       -- ones.
-      debugPrint ("CDecl' ty: " ++ show ty) $
-        debugPrint ("CDecl' fvs: " ++ show fvs ++ "\n") $ do
-        coms' <- local (updDecls $ add x ty) $
+      let tyscheme = mkTypeScheme [] ty
+      debugPrint ("CDecl' ty: " ++ show ty) $ do
+        coms' <- local (updDecls $ add x $ tyscheme) $
                  tycheckCommands coms
         return $ com' : coms'
 
+    -- TODO: produce a warning if shadowing an existing binding.
     CLet _ x tm ->
       debugPrint "CLet 3" $ do
-      decls <- asks ctx_decls
+      δ <- asks ctx_decls
       γ <- asks ctx_gamma
       let ty = ty_of_term tm
       -- Enforce value restriction since we have mutable references.
       -- I.e., only generalize the type when then term is a syntactic
       -- value. See TAPL or Xavier Leroy's PhD thesis.
-      tyscheme <- if isValue tm then
-                    generalize_ty ty >>= instantiate_tyscheme
-                  else return ty
-      case Symtab.get x decls of
+      let tyscheme = if isValue tm then generalize_ty ty
+                     else mkTypeScheme [] ty
+      case Symtab.get x δ of
         Just declTyscheme -> do
           _ <- unify_tyschemes (data_of_command com) tyscheme declTyscheme
           -- Ignore the result of unifying the type schemes since we
           -- want to use the exact type declared by the programmer.
-          debugPrint "CLet 2" $
+          debugPrint "CLet 4" $
             debugPrint ("tyscheme: " ++ show tyscheme) $
-            debugPrint ("declTyscheme: " ++ show declTyscheme ++ "\n") $ do
-            tyscheme' <- generalize_ty declTyscheme
-            coms' <- local (updGamma $ const $ add x tyscheme' γ) $
-                     tycheckCommands coms
-            return $ com' : coms'
+            debugPrint ("declTyscheme: " ++ show declTyscheme) $ do
+            let tyscheme' = loosen_tyscheme $
+                            generalize_ty (unTypeScheme declTyscheme)
+            debugPrint ("tyscheme': " ++ show tyscheme' ++ "\n") $ do
+              coms' <- local (updGamma $ const $
+                              add x tyscheme' γ) $
+                       tycheckCommands coms
+              return $ com' : coms'
         Nothing -> do
-          coms' <- local (updGamma $ const $ add x tyscheme γ) $
+          coms' <- local (updGamma $ const $
+                           add x tyscheme γ) $
                    tycheckCommands coms
           return $ com' : coms'
 
-    -- TODO: ensure that all free type variables appearing in the
-    -- constructor signatures are in the tyvars list, and generate a
-    -- warning if any tyvars are unused.
-    -- I really wonder if tying the knot like this is really
-    -- necessary.. but it seems to work so we'll leave it for now.
-    CData _ nm tyvars ctors ->
+    CData fi nm tyvars ctors ->
       debugPrint ("CData") $ do
-      let ty = normalize $ fixTy nm $ nameToVar nm $
-               abstractType tyvars $ TyVariant nm
-               (TyVar False <$> tyvars) ctors
-      let open = open_tyscheme ty
-      debugPrint ("nm: " ++ show nm) $
-        debugPrint ("ctors: " ++ show ctors) $
-        debugPrint ("ty: " ++ show ty) $
-        debugPrint ("open: " ++ show open) $ do
-        coms' <-
-          local (\ctx ->
-                   ctx { ctx_datatypes = add nm ty $ ctx_datatypes ctx
-                       , ctx_ctors =
-                         foldl (\acc x -> add x ty acc)
-                         (ctx_ctors ctx) (fst $ unzip ctors)
-
-                       -- Add types of curried constructor functions
-                       -- to the typing context.
-                       , ctx_gamma =
-                           foldl (\acc (ctorName, ctorTys) ->
-                                     let tys = map (normalize .
-                                                    tysubst' ty
-                                                    (TyVar False nm) .
-                                                    nameToVar nm) ctorTys in
-                                       add ctorName
-                                       (mkTypeScheme tyvars $ mkArrowType $
-                                        tys ++ [open]) acc)
-                           (ctx_gamma ctx) ctors
-                       }) $
-          tycheckCommands coms
-        return $ com' : coms'
-
-    -- TODO: same as above
+      -- I really wonder if tying the knot like this is really
+      -- necessary.. but it seems to work so we'll leave it for now.
+      -- ty <- normalize fi $ fixTy nm $ nameToVar nm $ abstractType tyvars $
+      --       TyVariant nm (TyVar False <$> tyvars) ctors
+      let ty = TyVariant nm (TyVar False <$> tyvars) ctors
+      debugPrint (show ty) $ do
+        let tyscheme = mkTypeScheme tyvars ty
+        let open = open_tyscheme tyscheme
+        debugPrint ("nm: " ++ show nm) $
+          debugPrint ("ctors: " ++ show ctors) $
+          debugPrint ("ty: " ++ show ty) $
+          debugPrint ("tyscheme: " ++ show tyscheme) $
+          debugPrint ("open: " ++ show open) $ do
+          ctorFuns <-
+            mapM (mapSndM $ \ctorTys ->
+                     return $ mkTypeScheme tyvars $
+                     -- tysubst' ty (TyVar False nm) $
+                     -- nameToVar nm $ mkArrowType $
+                     mkArrowType $ ctorTys ++ [open]) ctors
+          let fvs = nub $ concat $ map (freetyvars . snd) ctors
+          if not $ all (`elem` map (TyVar False) tyvars) fvs then
+            throwError $ "Type error : free type variable in definition of "
+            ++ show nm
+            else do
+            debugPrint (show fvs) $
+              debugPrint (show $ map (TyVar False) tyvars) $ do
+              if not $ all (`elem` fvs) (map (TyVar False) tyvars) then
+                tell ["Type warning: unused type variable in definition of "
+                      ++ show nm] else return ()
+              coms' <-
+                local (\ctx ->
+                         ctx { ctx_datatypes = add nm tyscheme $
+                                               ctx_datatypes ctx
+                             , ctx_ctors =
+                                 foldl (\acc x -> add x tyscheme acc)
+                                 (ctx_ctors ctx) (fst $ unzip ctors)
+                             -- Add types of curried constructor functions
+                             -- to the typing context.
+                             , ctx_gamma =
+                                 foldl (\acc (ctorName, ctorTy) ->
+                                          add ctorName ctorTy acc)
+                                 (ctx_gamma ctx) ctorFuns
+                             }) $
+                tycheckCommands coms
+              return $ com' : coms'
+  
     CRecord fi nm tyvars fields ->
       debugPrint ("CRecord") $ do
       γ <- asks ctx_gamma
@@ -477,33 +460,40 @@ tycheckCommands (com:coms) = do
                       Just _ -> throwError $ "field name " ++ show nm
                                 ++ " already exists at " ++ show fi
                       Nothing -> return ()) $ fst $ unzip fields
-      let ty = normalize $ fixTy nm $ nameToVar nm $
-               abstractType tyvars $ TyRecord nm
-               (TyVar False <$> tyvars) fields
-      let open = open_tyscheme ty
+      let ty = TyRecord nm (TyVar False <$> tyvars) fields
+      let tyscheme = mkTypeScheme tyvars ty
+      let open = open_tyscheme tyscheme
       debugPrint ("nm: " ++ show nm) $
         debugPrint ("fields: " ++ show fields) $
         debugPrint ("ty: " ++ show ty) $
-        debugPrint ("open: " ++ show open) $ do
+        debugPrint ("tyscheme: " ++ show tyscheme) $
+        debugPrint ("open: " ++ show open ++ "\n") $ do
+        fieldFuns <- mapM (mapSndM $ \fieldTy ->
+                              -- mkTypeScheme tyvars <$> (normalize fi $
+                              --   tysubst' ty (TyVar False nm) $
+                              return $ mkTypeScheme tyvars $
+                              TyArrow open fieldTy)
+                     fields
+        let fvs = concat $ map (freetyvars . snd) fields
+        if not $ all (`elem` map (TyVar False) tyvars) fvs then
+          throwError $ "Type error : free type variable in definition of "
+          ++ show nm
+          else do
+          if not $ all (`elem` fvs) (map (TyVar False) tyvars) then
+            tell ["Type warning: unused type variable in definition of "
+                   ++ show nm] else return ()
         coms' <-
           local (\ctx ->
-                   ctx { ctx_datatypes = add nm ty $ ctx_datatypes ctx
+                   ctx { ctx_datatypes = add nm tyscheme $ ctx_datatypes ctx
                        , ctx_fields =
-                         foldl (\acc x -> add x ty acc)
+                         foldl (\acc x -> add x tyscheme acc)
                          (ctx_fields ctx) (fst $ unzip fields)
-
                        -- Add types of field projection functions to
                        -- the typing context.
                        , ctx_gamma =
                            foldl (\acc (fieldName, fieldTy) ->
-                                     let ty' = normalize $
-                                               tysubst' ty
-                                               (TyVar False nm) $
-                                               nameToVar nm fieldTy in
-                                       add fieldName
-                                       (mkTypeScheme tyvars $
-                                        TyArrow open ty') acc)
-                           (ctx_gamma ctx) fields
+                                       add fieldName fieldTy acc)
+                           (ctx_gamma ctx) fieldFuns
                        }) $
           tycheckCommands coms
         return $ com' : coms'
@@ -524,36 +514,16 @@ tycheckProg p = do
 ty_of_term :: Term TyData -> Type
 ty_of_term = unTyData . data_of_term
 
-generalize_ty :: Type -> TycheckM Type
-generalize_ty ty = do
-  γ <- asks ctx_gamma
-  let fvs= freetyvars ty
-  let generalizable = map (fromJust . idOfType)
-        (filter (\(TyVar _ x) -> not $ x `exists` γ) fvs)
-  return $ mkTypeScheme generalizable ty
-
--- Passing False for the type variables rigidness doesn't matter since
--- the Eq instance for types ignores it.
-instantiate_tyscheme :: Type -> TycheckM Type
-instantiate_tyscheme (TyAbs x k s) = do
-  s' <- instantiate_tyscheme s
-  normalize . TyApp (TyAbs x k s') <$> TyVar False . Id <$> nextSym "?Y_"
-instantiate_tyscheme ty = return ty
-
--- Strip off type abstractions, leaving the body unchanged.
-open_tyscheme :: Type -> Type
-open_tyscheme (TyAbs _ _ s) = open_tyscheme s
-open_tyscheme ty = ty
-
 
 -- The first type scheme argument should be that obtained from
 -- typechecking the body of a let command, and the second should be
 -- the declared type. We expect the first to be more general than the
 -- second.
-unify_tyschemes :: Show α => α -> Type -> Type -> TycheckM Type
+unify_tyschemes :: Show α => α -> TypeScheme -> TypeScheme -> TycheckM Type
 unify_tyschemes fi tyscheme1 tyscheme2 = do
-  ty1 <- instantiate_tyscheme tyscheme1
-  ty2 <- instantiate_tyscheme tyscheme2
+  η <- asks ctx_datatypes
+  ty1 <- normalize fi η <$> instantiate_tyscheme fi tyscheme1
+  ty2 <- normalize fi η <$> instantiate_tyscheme fi tyscheme2
   debugPrint "unify_tyschemes" $
     debugPrint ("tyscheme1: " ++ show tyscheme1) $
     debugPrint ("tyscheme2: " ++ show tyscheme2) $
@@ -563,15 +533,19 @@ unify_tyschemes fi tyscheme1 tyscheme2 = do
       Left (s, t) -> unifyError s t fi
       Right tsubst -> do
         debugPrint ("tsubst: " ++ show tsubst ++ "\n") $ do
-          return $ tysubstAll tsubst ty1
+          return $ tysubstAll' tsubst ty1
 
 
--- -- Make all type variables in a type non-rigid.
+-- Make all type variables in a type non-rigid.
 loosen_type :: Type -> Type
 loosen_type = typeRec $
   \ty -> case ty of
     TyVar _ x -> TyVar False x
     _ -> ty
+
+-- Make all type variables in a type scheme non-rigid.
+loosen_tyscheme :: TypeScheme -> TypeScheme
+loosen_tyscheme = mkTypeScheme [] . loosen_type . unTypeScheme
 
 
 -- Given a pattern, generate a type for it containing type variables
@@ -590,9 +564,9 @@ patternType :: Show α => α -> Pattern ->
 patternType _ (PVar x) = do
   ty <- TyVar False . Id <$> nextSym "?Y_"
   return (ty, [(x, ty)], [])
-patternType _ PUnit = return (TyUnit, [], [])
+patternType _ PUnit     = return (TyUnit, [], [])
 patternType _ (PBool _) = return (TyBool, [], [])
-patternType _ (PInt _) = return (TyInt, [], [])
+patternType _ (PInt _)  = return (TyInt, [], [])
 patternType _ (PChar _) = return (TyChar, [], [])
 patternType fi (PPair p1 p2) = do
   (ty1, binds1, cs1) <- patternType fi p1
@@ -607,21 +581,24 @@ patternType fi (PConstructor nm ps) = do
   (tys, binds, cs) <- trimap id concat concat . unzip3 <$>
                       mapM (patternType fi) ps
   variantTypeConstr <- asks (Symtab.get nm . ctx_ctors)
-  case variantTypeConstr of
-    Just vTyConstr -> do
-      vTy@(TyVariant _ _ ctors) <- instantiate_tyscheme vTyConstr
-      case assocGet nm ctors of
-        Just tys' ->
-          if length tys == length tys' then
-            return (vTy, binds, cs ++ zip tys tys')
-          else
-            throwError $ "Type error: wrong number of arguments to " ++
-            show nm ++ " constructor in pattern at " ++ show fi
-        Nothing ->
-          throwError $ "Type error: constructor " ++ show nm ++
-          "not found in definition of type " ++ show vTy
-    Nothing -> throwError $ "Type error: unbound identifier " ++
-               show nm ++ " at " ++ show fi
+  debugPrint "PConstructor" $
+    case variantTypeConstr of
+      Just vTyConstr -> do
+        vTy@(TyVariant _ _ ctors) <-
+          pure (normalize fi) <*> asks ctx_datatypes <*>
+          instantiate_tyscheme fi vTyConstr
+        case assocGet nm ctors of
+          Just tys' ->
+            if length tys == length tys' then
+              return (vTy, binds, cs ++ zip tys tys')
+            else
+              throwError $ "Type error: wrong number of arguments to " ++
+              show nm ++ " constructor in pattern at " ++ show fi
+          Nothing ->
+            throwError $ "Type error: constructor " ++ show nm ++
+            "not found in definition of type " ++ show vTy
+      Nothing -> throwError $ "Type error: unbound identifier " ++
+                 show nm ++ " at " ++ show fi
 
 -- We don't check for empty fields list here, since it should be
 -- syntactically impossible, and never generated anywhere.
@@ -638,7 +615,7 @@ patternType fi (PRecord pfields) = do
   if not $ allEq tys' then
     throwError $ "mal-formed record pattern at " ++ show fi
     else do
-    recTy@(TyRecord _ _ fields) <- instantiate_tyscheme $ tys'!!0
+    recTy@(TyRecord _ _ fields) <- instantiate_tyscheme fi $ tys'!!0
     cs' <- mapM (\(nm, ty) ->
                      case assocGet nm fields of
                        Just ty' -> return (ty, ty')
@@ -646,21 +623,6 @@ patternType fi (PRecord pfields) = do
                                   show nm ++ " at " ++ show fi) $
            zip nms tys
     return (recTy, binds, cs ++ cs')
-
--- Look up all TyNames and replace them with their actual types.
-resolveTyNames :: Show α => α -> Type -> TycheckM Type
-resolveTyNames fi =
-  typeRecM $
-  \ty -> case ty of
-    TyName nm -> do
-      δ <- asks ctx_datatypes
-      case Symtab.get nm δ of
-        Just ty' -> return ty'
-        Nothing ->
-          -- debugPrint (show δ) $
-          throwError $ "Type error: unbound type identifier " ++
-            show nm ++ " at " ++ show fi
-    _ -> return ty
 
 
 -- Abstract a type over a list of Ids. We assume their kinds to be *
@@ -672,19 +634,13 @@ abstractType (x:xs) = TyAbs x KStar . abstractType xs
 
 -- Pass through the input type, raising an error if it isn't
 -- well-kinded.
-wellKinded :: Type -> TycheckM Type
-wellKinded ty = case kindCheck ty of
-                  Just _ -> return ty
-                  _ -> throwError $ "Type error: " ++ show ty ++
-                       " is not well-kinded"
-
-
--- Build a type supercombinator (type scheme) with the given Ids
--- (which may appear free in the given type body).
-mkTypeScheme :: [Id] -> Type -> Type
-mkTypeScheme [] ty = ty
-mkTypeScheme (x:xs) ty = TyAbs x KStar $ mkTypeScheme xs ty
-
+wellKinded :: Show α => α -> Type -> TycheckM Type
+wellKinded fi ty = do
+  η <- asks ctx_datatypes
+  case kindCheck $ normalize fi η ty of
+    Just _ -> return ty
+    _ -> throwError $ "Type error: " ++ show ty ++
+         " is not well-kinded"
 
 -- Replace all TyNames with TyVars of the same Id.
 nameToVar :: Id -> Type -> Type

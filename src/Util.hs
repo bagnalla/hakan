@@ -4,11 +4,11 @@ import Data.Bifunctor
 import Debug.Trace (trace)
 import System.IO.Unsafe
 
-debugPrint :: String -> b -> b
-debugPrint = trace
-
 -- debugPrint :: String -> b -> b
--- debugPrint = const id
+-- debugPrint = trace
+
+debugPrint :: String -> b -> b
+debugPrint = const id
 
 tupleFun :: (a -> b) -> (a -> c) -> a -> (b, c)
 tupleFun f g x = (f x, g x)

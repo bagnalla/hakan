@@ -16,7 +16,7 @@ module Symtab (
   ) where
 
 -- Use Haskell's map data structure
-import qualified Data.Map.Strict as Map
+import qualified Data.Map as Map
 import Test.QuickCheck
 
 

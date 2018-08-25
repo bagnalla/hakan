@@ -9,3 +9,6 @@ let cotuple = λf. λg. λs.
   destruct s as
   | Inl x → f x
   | Inr y → g y
+
+
+# 〚 cotuple 〛
