@@ -93,6 +93,6 @@ def intOfNat = λ n.
   | Succ n' → 1 + intOfNat n'
 
 -- 〚 intOfNat (plus (natOfInt 113) (natOfInt 150)) 〛
--- 〚 intOfNat (mult (natOfInt 11) (natOfInt 50)) 〛
+〚 intOfNat (mult (natOfInt 11) (natOfInt 50)) 〛
 # This div computation isn't right for some reason.
-〚 intOfNat (div (natOfInt 1000) (pow (natOfInt 2) (fact (natOfInt 3)))) 〛
+-- 〚 intOfNat (div (natOfInt 1000) (pow (natOfInt 2) (fact (natOfInt 3)))) 〛

@@ -3,7 +3,7 @@
 module Context (
   Context(..), TypeScheme, normalize, instantiate_tyscheme, generalize_ty,
   mkTypeScheme, initCtx, updDecls, updGamma, unTypeScheme, open_tyscheme,
-  map_tyscheme, mapM_tyscheme
+  map_tyscheme, mapM_tyscheme, updClasses
   ) where
 
 import Control.Monad.Reader
@@ -30,23 +30,51 @@ data Context =
   -- map constructor names to their datatypes (ε)
   ctx_ctors :: Symtab TypeScheme,
   -- map field names to their record types (ε)
-  ctx_fields :: Symtab TypeScheme
+  ctx_fields :: Symtab TypeScheme,
+  -- map class names to TypeClasses (φ)
+  ctx_classes :: Symtab TypeClass,
+  -- map method names to TypeClasses (φ)
+  ctx_methods :: Symtab TypeClass,
+  -- map class names to association lists mapping types to class
+  -- instances (ψ)
+  ctx_instances :: Symtab [ClassInstance]
   }
   deriving Show
+
+-- map types to instances. types including arrow types and everything,
+-- including abstractions. When we search for types in the instance
+-- database, instead of checking for equality we hold their type
+-- variables rigid and try to unify with the type we're searching
+-- for. Then we will know the class constraints .. ?
+
+-- Or maybe we just use a slightly different notion of equality -- up
+-- to renaming of variables (including free variables) (so we don't
+-- have to invoke unification). Then we actually hold the variables of
+-- the type we're searching for fixed and do renaming on the types
+-- we're searching through. When we have a match the constraints of
+-- the matching type will be exactly what we want.
 
 initCtx :: Context
 initCtx = Context { ctx_decls = empty
                   , ctx_gamma = empty
                   , ctx_datatypes = empty
                   , ctx_ctors = empty
-                  , ctx_fields = empty }
+                  , ctx_fields = empty
+                  , ctx_classes = empty
+                  , ctx_methods = empty
+                  , ctx_instances = empty }
 
-updDecls :: (Symtab TypeScheme -> Symtab TypeScheme) -> Context -> Context
+updDecls :: (Symtab TypeScheme -> Symtab TypeScheme) ->
+            Context -> Context
 updDecls f ctx = ctx { ctx_decls = f $ ctx_decls ctx }
 
-updGamma :: (Symtab TypeScheme -> Symtab TypeScheme) -> Context -> Context
+updGamma :: (Symtab TypeScheme -> Symtab TypeScheme) ->
+            Context -> Context
 updGamma f ctx = ctx { ctx_gamma = f $ ctx_gamma ctx }
 
+updClasses :: (Symtab TypeClass -> Symtab TypeClass) ->
+              Context -> Context
+updClasses f ctx = ctx { ctx_classes = f $ ctx_classes ctx }
 
 -----------------
 -- | Type schemes
@@ -70,7 +98,7 @@ instance Show TypeScheme where
 
 generalize_ty :: Type -> TypeScheme
 generalize_ty ty =
-  mkTypeScheme (fromJust . idOfType <$> freetyvars ty) ty
+  mkTypeScheme (idOfType <$> freetyvars ty) ty
 
 
 -- Build a type scheme from a list of Ids and a type, where the Ids
@@ -80,7 +108,7 @@ mkTypeScheme xs = TypeScheme . go xs
   where
     go :: [Id] -> Type -> Type
     go [] ty = ty
-    go (x:xs) ty = TyAbs x KStar $ go xs ty
+    go (y:ys) ty = TyAbs y KStar $ go ys ty
 
 
 -- Strip off type abstractions, leaving the body unchanged.
@@ -89,7 +117,7 @@ open_tyscheme (TypeScheme ty) = go ty
   where
     go :: Type -> Type
     go (TyAbs _ _ s) = go s
-    go ty = ty
+    go t = t
 
 map_tyscheme :: (Type -> Type) -> TypeScheme -> TypeScheme
 map_tyscheme f = TypeScheme . f . unTypeScheme
@@ -121,7 +149,7 @@ normalize fi η = typeRec $
   \ty ->
     case ty of
       TyApp (TyAbs x _ t) s ->
-        tysubst' s (TyVar False x) t
+        tysubst' s (mkTyVar x) t
       _ -> resolveTyNames fi η ty
 
 
@@ -144,11 +172,10 @@ resolveTyNames fi η =
 
 -- Passing False for the type variables rigidness doesn't matter since
 -- the Eq instance for types ignores it.
-instantiate_tyscheme :: (Show α, Num s, Show s,
-                         MonadState s m, MonadReader Context m) =>
+instantiate_tyscheme :: (Show α, Num s, Show s, MonadState s m) =>
                         α -> TypeScheme -> m Type
 -- instantiate_tyscheme fi = (go >=> normalize fi) . unTypeScheme
-instantiate_tyscheme fi = go . unTypeScheme
+instantiate_tyscheme _ = go . unTypeScheme
   where
     go :: (Num s, Show s, MonadState s m) => Type -> m Type
     -- go (TyAbs x k s) = do
@@ -159,5 +186,5 @@ instantiate_tyscheme fi = go . unTypeScheme
     -- and understand.
     go (TyAbs x k s) =
       pure (TyApp . TyAbs x k) <*> go s <*>
-      (TyVar False . Id <$> nextSym "?Y_")      
+      (mkTyVar . Id <$> nextSym "?Y_")      
     go ty = return ty

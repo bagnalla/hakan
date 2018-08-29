@@ -30,6 +30,8 @@ interpCommands :: [Command ()] -> InterpM Value
 interpCommands [] = return VUnit
 interpCommands (CDecl _ _ _ : cs) = interpCommands cs
 interpCommands (CCheck _ _ : cs) = interpCommands cs
+interpCommands (CClass _ _ _ _ _ : cs) = interpCommands cs
+interpCommands (CInstance _ _ _ _ _ : cs) = interpCommands cs
 interpCommands (CLet _ nm tm : cs) = do
   v <- eval tm
   local (Env . add nm v . unEnv) $ interpCommands cs
@@ -64,4 +66,4 @@ interpCommands (CAssert _ tm : cs) = do
   case v of
     VBool True -> interpCommands cs
     VBool False -> error $ "Assertion failed: " ++ show tm
-    _ -> error "Interp: bad assertion"
+    _ -> error $ "Interp: bad assertion: " ++ show tm

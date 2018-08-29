@@ -1,6 +1,7 @@
 module Util where
 
 import Data.Bifunctor
+import Data.List (isInfixOf)
 import Debug.Trace (trace)
 import System.IO.Unsafe
 
@@ -37,3 +38,16 @@ quadmap f g h k (x, y, z, w) = (f x, g y, h z, k w)
 allEq :: Eq a => [a] -> Bool
 allEq [] = True
 allEq (x:xs) = all (== x) xs
+
+isPermutationOf :: Eq a => [a] -> [a] -> Bool
+isPermutationOf xs ys = length xs == length ys && xs `isInfixOf` ys
+
+
+class Test a where
+  test :: a -> ()
+
+instance (Num a, Num b) => Test ((->) a b) where
+  test = const ()
+
+-- instance (Num a) => Test ((->) a) where
+--   test = const ()

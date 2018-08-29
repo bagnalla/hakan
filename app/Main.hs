@@ -4,7 +4,7 @@ import Control.Monad
 import System.Environment (getArgs)
 -- import System.IO (hGetContents)
 import Ast
-import Core (genTypeVars, unify, FreeTyVars(..), TySubstable(..))
+import Core (genTypeVars, unify)
 import Interp (interpProg)
 import Parser (parseProg)
 import Preprocessor (importLines, substImports)
@@ -31,8 +31,8 @@ main = do
   -- Replace imports by inlining their source code
   let src' = substImports src import_srcs
 
-  -- let ast = parseAndTycheck src'
-  -- putStrLn $ show ast
+  let ast = parseAndTycheck src'
+  putStrLn $ show ast
 
   -- let tyx = TyVar False (Id "x")
   -- let tyy = TyVar False (Id "y")

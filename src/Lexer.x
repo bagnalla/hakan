@@ -29,6 +29,7 @@ tokens :-
   $white+                       ;
   "->"                          { lex' TokenArrow }
   \→                            { lex' TokenArrow }
+  "=>"                          { lex' TokenFatArrow }
   "."                           { lex' TokenDot }
   ","                           { lex' TokenComma }
   Bool                          { lex' TokenBoolTy }
@@ -120,6 +121,9 @@ tokens :-
   pure                          { lex' TokenPure }
   impure                        { lex' TokenImpure }
   io                            { lex' TokenIO }
+  class                         { lex' TokenClass }
+  instance                      { lex' TokenInstance }
+  where                         { lex' TokenWhere }
   -- eof                        { lex' TokenEOF }
   \'.\'                         { lex (TokenChar . head . tail) }
   $capital [$alpha $digit \_ \']* { lex (TokenCapId . Id) }
@@ -159,6 +163,7 @@ data TokenClass =
   | TokenRefTy
   | TokenTT
   | TokenArrow
+  | TokenFatArrow
   | TokenDot
   | TokenBool Bool
   | TokenInt Integer
@@ -230,6 +235,9 @@ data TokenClass =
   | TokenPure
   | TokenImpure
   | TokenIO
+  | TokenClass
+  | TokenInstance
+  | TokenWhere
     deriving (Eq,Show)
 
 -- For nice parser error messages.
@@ -250,6 +258,7 @@ unLex TokenUnitTy          = "Unit"
 unLex TokenRefTy           = "Ref"
 unLex TokenTT              = "tt"
 unLex TokenArrow           = "->"
+unLex TokenFatArrow        = "=>"
 unLex TokenDot             = "."
 unLex (TokenBool b)        = show b
 unLex (TokenInt i)         = show i
@@ -317,6 +326,9 @@ unLex TokenAssert          = "assert"
 unLex TokenPure            = "pure"
 unLex TokenImpure          = "impure"
 unLex TokenIO              = "io"
+unLex TokenClass           = "class"
+unLex TokenInstance        = "instance"
+unLex TokenWhere           = "where"
 unLex TokenEOF             = "<EOF>"
 
 alexEOF :: Alex Token

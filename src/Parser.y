@@ -22,6 +22,7 @@ import Ast (data_of_term)
 
 %token
   arrow        { Token $$ TokenArrow }
+  fatarrow     { Token $$ TokenFatArrow }
   '.'          { Token $$ TokenDot }
   bool         { Token $$ TokenBoolTy }
   int          { Token $$ TokenIntTy }
@@ -104,6 +105,9 @@ import Ast (data_of_term)
   pure         { Token $$ TokenPure }
   impure       { Token $$ TokenImpure }
   io           { Token $$ TokenIO }
+  class        { Token $$ TokenClass }
+  instance     { Token $$ TokenInstance }
+  where        { Token $$ TokenWhere }
   -- eof          { Token $$ TokenEOF }
 
 %nonassoc ':'
@@ -141,7 +145,7 @@ AType :
   | int { Ast.TyInt }
   | char { Ast.TyChar }
   | '(' Type ')' { $2 }
-  | id { Ast.TyVar False $ idFromToken $1 }
+  | id { Ast.TyVar False [] $ idFromToken $1 } -- TODO
   | capid { Ast.TyName (idFromToken $1) }
   | '[' Type ']'
     { Ast.TyApp (Ast.TyName $ Id "List") $2 }
@@ -171,7 +175,7 @@ DeclAType :
   | int { Ast.TyInt }
   | char { Ast.TyChar }
   | '(' DeclType ')' { $2 }
-  | id { Ast.TyVar True $ idFromToken $1 }
+  | id { Ast.TyVar True [] $ idFromToken $1 } -- TODO
   | capid { Ast.TyName (idFromToken $1) }
   | '[' DeclType ']'
     { Ast.TyApp (Ast.TyName $ Id "List") $2 }
@@ -199,7 +203,7 @@ Term :
   | if Term then Term else Term { Ast.TmIf $1 $2 $4 $6 }
   | '\\' Id opt(TyBinder) '.' Term {
         Ast.TmAbs $1 (idFromToken $2) (case $3 of
-			 Nothing -> Ast.TyVar False (Id "")
+			 Nothing -> Ast.mkTyVar (Id "")
 			 Just ty -> ty) $5 }
   | '-' Term %prec UNOP { Ast.TmUnop $1 Ast.UMinus $2 }
   | '~' Term %prec UNOP { Ast.TmUnop $1 Ast.UNot $2 }
@@ -304,33 +308,62 @@ Ctor :
                                        Nothing -> []) }
 
 Command :
---  val id TyDeclBinder { Ast.CDecl (infoFromToken $2) (idFromToken $2) $3 }
   pure id TyDeclBinder { Ast.CDecl (infoFromToken $2) (idFromToken $2) $3 }
---  | let id Binder { Ast.CLet (infoFromToken $2) (idFromToken $2) $3 }
   | def id Binder {
       let (fi, x) = (infoFromToken $2, idFromToken $2) in
         Ast.CLet fi x (Ast.TmUnop fi Ast.UFix (Ast.TmAbs fi x
-                 (Ast.TyVar False (Id "")) $3)) }
+                 (Ast.mkTyVar (Id "")) $3)) }
   | evaluate Term { Ast.CEval $1 $2 }
   | '〚' Term '〛' { Ast.CEval $1 $2 }
+  | data ClassConstraints fatarrow capid list(id) '=' barlist(Ctor)
+      { Ast.propagateClassConstraintsCom $2 $
+          Ast.CData $1 (idFromToken $4) (map idFromToken $5) $7 }
   | data capid list(id) '=' barlist(Ctor)
       { Ast.CData $1 (idFromToken $2) (map idFromToken $3) $5 }
+  | record ClassConstraints fatarrow capid list(id) '=' '{'
+    seplist(FieldDecl, ',') '}'
+      { Ast.propagateClassConstraintsCom $2 $
+          Ast.CRecord $1 (idFromToken $4) (map idFromToken $5) $8 }
   | record capid list(id) '=' '{' seplist(FieldDecl, ',') '}'
       { Ast.CRecord $1 (idFromToken $2) (map idFromToken $3) $6 }
   | assert BExp { Ast.CAssert $1 $2 }
   | check Term { Ast.CCheck $1 $2 }
+  | class ClassConstraints fatarrow capid id where barlist(FieldDecl)
+      { Ast.CClass $1 (map fst $2) (idFromToken $4) (idFromToken $5) $7 }
+  | class capid id where barlist(FieldDecl)
+      { Ast.CClass $1 [] (idFromToken $2) (idFromToken $3) $5 }
+  | instance ClassConstraints fatarrow capid Type
+    where barlist(InstanceMethod)
+      { Ast.CInstance $1 (map fst $2) (idFromToken $4) $5 $7 }
+  | instance capid Type where barlist(InstanceMethod)
+      { Ast.CInstance $1 [] (idFromToken $2) $3 $5 }
 
 FieldDecl :
   id TyBinder { (idFromToken $1, $2) }
+
+ClassConstraint :
+  capid id { (idFromToken $1, idFromToken $2) }
+
+ClassConstraints :
+  ClassConstraint { [$1] }
+  | '(' seplist(ClassConstraint, ',') ')' { $2 }
 
 TyBinder :
   ':' Type { $2 }
 
 TyDeclBinder :
-  ':' DeclType { $2 }
+
+  -- Propagate class constraints to type variables. Doesnt avoid capture.
+  -- Assumes there are no type abstractions.
+  ':' ClassConstraints fatarrow DeclType
+    { Ast.propagateClassConstraints $2 $4 }
+  | ':' DeclType { $2 }
 
 Binder :
   '=' Term { $2 }
+
+InstanceMethod :
+  id '=' Term { (idFromToken $1, $3) }
 
 Commands :
 --  Commands ';' Commands { $1 ++ $3 }
