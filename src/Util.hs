@@ -5,11 +5,11 @@ import Data.List (isInfixOf)
 import Debug.Trace (trace)
 import System.IO.Unsafe
 
--- debugPrint :: String -> b -> b
--- debugPrint = trace
-
 debugPrint :: String -> b -> b
-debugPrint = const id
+debugPrint = trace
+
+-- debugPrint :: String -> b -> b
+-- debugPrint = const id
 
 tupleFun :: (a -> b) -> (a -> c) -> a -> (b, c)
 tupleFun f g x = (f x, g x)
@@ -40,7 +40,7 @@ allEq [] = True
 allEq (x:xs) = all (== x) xs
 
 isPermutationOf :: Eq a => [a] -> [a] -> Bool
-isPermutationOf xs ys = length xs == length ys && xs `isInfixOf` ys
+isPermutationOf xs ys = length xs == length ys && all (`elem` ys) xs
 
 
 class Test a where

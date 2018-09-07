@@ -16,5 +16,5 @@ class TestClass a where
   | muh : a -> Bool
 
 instance TestClass Int where
-  | bakow = λx. x
   | muh = λx. ⊥
+  | bakow = λx. x

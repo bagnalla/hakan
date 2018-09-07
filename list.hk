@@ -68,3 +68,5 @@ def l = tail (range 10)
 〚 head l 〛
 
 〚 map (λ x. x + 1) l 〛
+
+-- [| map (λ x. x + 1) l |]

@@ -1,0 +1,30 @@
+
+data List a =
+  | Nil
+  | Cons a (List a)
+
+-- record Test a =
+--  { name : [a] }
+
+
+pure f : [a] → [a]
+def f = λ x. x
+
+-- pure g : [a] → [a]
+-- def g = f
+
+
+-- pure app : [a] → [a] → [a]
+-- def app = λ l1. λ l2.
+--   destruct l1 as 
+--   | Nil → l2
+--   | Cons x l1' → Cons x (app l1' l2)
+
+-- pure concat : [[a]] → [a]
+-- def concat = λ l.
+--   destruct l as
+--   | Nil → Nil
+--   | Cons x l' → app x (concat l')
+
+-- pure f : [a] -> [a] -> [a]
+-- def f = app

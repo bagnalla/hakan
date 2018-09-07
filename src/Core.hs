@@ -4,19 +4,15 @@
 -- language (mostly related to evaluation of terms).
 
 module Core (
-  genTypeVars,
-  ConstrSet,
-  unify,
-  idOfType,
-  isTyVar,
-  fixTy,
-  kindCheck
+  genTypeVars, idOfType, isTyVar, fixTy, kindCheck, ctxOfType, isRigid,
+  isBiType, pairOfType, isTyRef, tyOfRefType, isVariantTy, isRecordTy,
+  tyargsOfTy, isTyConstructor
   ) where
 
 -- import Control.Applicative (liftA2)
 import Control.Monad.State
-import Data.Bifunctor
-import Data.List (nub, union)
+-- import Data.Bifunctor
+import Data.List (nub)
 import qualified Data.Traversable as T
 
 import Ast
@@ -25,96 +21,102 @@ import Symtab (Id(..), Symtab, map, get)
 import Util (debugPrint, mapSnd, isPermutationOf)
 
 
-----------------
--- | Unification
+-- ----------------
+-- -- | Unification
 
--- The type of constraint sets
-type ConstrSet = [(Type, Type)]
+-- -- The type of constraint sets
+-- type ConstrSet = [(Type, Type)]
 
 
--- TODO: unification needs to be aware of all currently known instance
--- declarations in order to do context reduction when a type or type
--- constructor is unified with a type variable that has class
--- constraints. We look up the type instance, the instances it depends
--- on, etc. until all constraints are eliminated (by finding instances
--- for them). Then we know it's safe to unify. When two type variables
--- are unified, we just take the set union of their class
--- constraints. At the end of the day we have either type variables
--- with all necessary class constraints attached, or concrete types
--- which are known to satisfy the necessary class constraints.
+-- -- Unification needs to be aware of all currently known instance
+-- -- declarations in order to do context reduction when a type or type
+-- -- constructor is unified with a type variable that has class
+-- -- constraints. We look up the type instance, the instances it depends
+-- -- on, etc. until all constraints are eliminated (by finding instances
+-- -- for them). Then we know it's safe to unify. When two type variables
+-- -- are unified, we just take the set union of their class
+-- -- constraints. At the end of the day we have either type variables
+-- -- with all necessary class constraints attached, or concrete types
+-- -- which are known to satisfy the necessary class constraints.
 
-unify :: Symtab [ClassInstance] -> ConstrSet ->
-         Either (Type, Type, String) TypeSubst
-unify _ [] = Right []
+-- unify :: Symtab [ClassInstance] -> ConstrSet ->
+--          Either (Type, Type, String) TypeSubst
+-- unify _ [] = Right []
 
--- Rigid type variables refuse to change.
-unify ψ ((s, t) : xs) =
-  -- Ensure equal type variables have the same class constraints since
-  -- the Eq instance for types only checks their Ids. Not sure that
-  -- this is actually necessary.
-  if isTyVar s && isTyVar t && s == t then
-    if ctxOfType s `isPermutationOf` ctxOfType t then
-      unify ψ xs
-    else
-      Left (s, t, "Class constraints don't match")
-  else if s == t then
-    unify ψ xs
-  else if isTyVar s && (not $ isRigid s) &&
-          (not $ s `elem` freetyvars t) then
-    do
-      case t of
-        TyVar b ctx x -> do
-          rest <- unify ψ $
-            tysubst' (TyVar b (ctx `union` ctxOfType s) x) s xs
-          return $ (t, s) : rest
-        _ -> do
-          let ctx = ctxOfType s -- list of Class name Ids
-          -- Do context reduction for each class. The type we are
-          -- unifying s with must satisfy all of the class constraints
-          -- on s.
+-- -- Rigid type variables refuse to change.
+-- unify ψ ((s, t) : xs) =
+--   -- Ensure equal type variables have the same class constraints since
+--   -- the Eq instance for types only checks their Ids. Not sure that
+--   -- this is actually necessary.
+--   if debugPrint "a" $ isTyVar s && isTyVar t && s == t then
+--     if ctxOfType s `isPermutationOf` ctxOfType t then
+--       unify ψ xs
+--     else
+--       Left (s, t, "Class constraints don't match")
+--   else if debugPrint "b" $ s == t then
+--     unify ψ xs
+--   else if debugPrint "c" $ isTyVar s && (not $ isRigid s) &&
+--           (not $ s `elem` freetyvars t) then
+--     do
+--       case t of
+--         TyVar b ctx x -> do
+--           rest <- unify ψ $
+--             tysubst' (TyVar b (ctx `union` ctxOfType s) x) s xs
+--           return $ (t, s) : rest
+--         _ -> do
+--           let ctx = ctxOfType s -- list of Class name Ids
+--           -- Do context reduction for each class. The type we are
+--           -- unifying s with must satisfy all of the class constraints
+--           -- on s.
 
-          -- For each class name, search through the instance database
-          -- looking for a match using a simplified unification
-          -- algorithm which only unifies type variables and fails if
-          -- the structure of the types are not exactly the same
-          -- module type variables.
+--           -- For each class name, search through the instance database
+--           -- looking for a match using a simplified unification
+--           -- algorithm which only unifies type variables and fails if
+--           -- the structure of the types are not exactly the same
+--           -- module type variables.
 
-          case resolveInstances ψ t ctx of
-            Left classNm ->
-              Left (s, t, "Unable to satisfy class constraint " ++
-                     show classNm ++ " for type " ++ show t)
-            Right constrs -> do
-              -- Propagate constraints to type variables in t and xs
-              -- before continuing unification.
-              let t' = propagateClassConstraints constrs t
-              let xs' = bimap (propagateClassConstraints constrs)
-                        (propagateClassConstraints constrs) <$> xs
-              rest <- unify ψ $ tysubst' t' s xs'
-              return $ (t, s) : rest
+--           case resolveInstances ψ t ctx of
+--             Left classNm ->
+--               Left (s, t, "Unable to satisfy class constraint " ++
+--                      show classNm ++ " for type " ++ show t)
+--             Right constrs -> do
+--               -- Propagate constraints to type variables in t and xs
+--               -- before continuing unification.
+--               let t' = propagateClassConstraints constrs t
+--               let xs' = bimap (propagateClassConstraints constrs)
+--                         (propagateClassConstraints constrs) <$> xs
+--               rest <- unify ψ $ tysubst' t' s xs'
+--               return $ (t, s) : rest
 
-  -- Just handle the above case and then in this one do a recursive
-  -- call with s and t swapped.
-  else if isTyVar t && (not $ isRigid t) &&
-          (not $ t `elem` freetyvars s) then
-    unify ψ $ (t, s) : xs
+--   -- Just handle the above case and then in this one do a recursive
+--   -- call with s and t swapped.
+--   else if debugPrint "d" (isTyVar t) && debugPrint "e" (not $ isRigid t) &&
+--           debugPrint (show s) (not $ t `elem` freetyvars s) then
+--     debugPrint "g" $
+--     unify ψ $ (t, s) : xs
 
-  else if isBiType s && isBiType t then
-    let (s1, s2) = pairOfType s
-        (t1, t2) = pairOfType t in
-      unify ψ $ (s1, t1) : (s2, t2) : xs
-  else if isTyRef s && isTyRef t then
-    let s' = tyOfRefType s
-        t' = tyOfRefType t in
-      unify ψ $ (s', t') : xs
-  else if (isVariantTy s && isVariantTy t ||
-           isRecordTy s && isRecordTy t) &&
-          idOfType s == idOfType t then
-    let s' = tyargsOfTy s
-        t' = tyargsOfTy t in
-      unify ψ $ zip s' t' ++ xs
-  else
-    -- Failed to unify s and t
-    Left (s, t, "Incompatible types")
+--   else if debugPrint "e" $ isBiType s && isBiType t then
+--     let (s1, s2) = pairOfType s
+--         (t1, t2) = pairOfType t in
+--       unify ψ $ (s1, t1) : (s2, t2) : xs
+--   else if isTyRef s && isTyRef t then
+--     let s' = tyOfRefType s
+--         t' = tyOfRefType t in
+--       unify ψ $ (s', t') : xs
+--   -- else if (isVariantTy s && isVariantTy t ||
+--   --          isRecordTy s && isRecordTy t) &&
+--   --         idOfType s == idOfType t then
+--   --   let s' = tyargsOfTy s
+--   --       t' = tyargsOfTy t in
+--   --     unify ψ $ zip s' t' ++ xs
+--   else if isTyConstructor s && isTyConstructor t &&
+--           idOfType s == idOfType t then
+--     let s' = tyargsOfTy s
+--         t' = tyargsOfTy t in
+--       unify ψ $ zip s' t' ++ xs
+--   else
+--     -- Failed to unify s and t
+--     Left (s, t, "Incompatible types")
 
 
 resolveInstances :: Symtab [ClassInstance] -> Type -> [Id] ->
@@ -412,7 +414,9 @@ idOfType :: Type -> Id
 idOfType (TyVar _ _ x) = x
 idOfType (TyVariant x _ _) = x
 idOfType (TyRecord x _ _) = x
-idOfType _ = error "idOfType: expected variable, variant, or record type"
+idOfType (TyConstructor (TypeConstructor { tycon_name = nm })) = nm
+idOfType _ =
+  error "idOfType: expected variable, variant, record, or type constructor"
 
 ctxOfType :: Type -> [Id]
 ctxOfType (TyVar _ ctx _) = ctx
@@ -438,6 +442,10 @@ isRecordTy :: Type -> Bool
 isRecordTy (TyRecord _ _ _) = True
 isRecordTy _ = False
 
+isTyConstructor :: Type -> Bool
+isTyConstructor (TyConstructor _) = True
+isTyConstructor _ = False
+
 isRigid :: Type -> Bool
 isRigid (TyVar True _ _) = True
 isRigid _ = False
@@ -453,4 +461,6 @@ tyOfRefType _ = error "tyOfRef: expected ref type"
 tyargsOfTy :: Type -> [Type]
 tyargsOfTy (TyVariant _ tyargs _) = tyargs
 tyargsOfTy (TyRecord _ tyargs _) = tyargs
+tyargsOfTy (TyConstructor (TypeConstructor { tycon_tyargs = tyargs })) =
+  tyargs
 tyargsOfTy _ = error "tyargsOfTy: expected variant or record xtype"

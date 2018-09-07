@@ -4,7 +4,7 @@ import Control.Monad
 import System.Environment (getArgs)
 -- import System.IO (hGetContents)
 import Ast
-import Core (genTypeVars, unify)
+import Core (genTypeVars)
 import Interp (interpProg)
 import Parser (parseProg)
 import Preprocessor (importLines, substImports)

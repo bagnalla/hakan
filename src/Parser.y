@@ -164,36 +164,6 @@ Type :
   | Type '?' { Ast.TyApp (Ast.TyName $ Id "Option") $1 }
   | refty Type { Ast.TyRef $2 }
 
--- The only reason we duplicate the grammar for types is so that type
--- variables in a type declaration are marked as rigid. There is probably
--- a better way to do this, either here in the parser or just by marking
--- them as rigid after the fact in the typechecker.
-
-DeclAType :
-  unit { Ast.TyUnit }
-  | bool { Ast.TyBool }
-  | int { Ast.TyInt }
-  | char { Ast.TyChar }
-  | '(' DeclType ')' { $2 }
-  | id { Ast.TyVar True [] $ idFromToken $1 } -- TODO
-  | capid { Ast.TyName (idFromToken $1) }
-  | '[' DeclType ']'
-    { Ast.TyApp (Ast.TyName $ Id "List") $2 }
-
-DeclAppType :
-  DeclAType { $1 }
-  | DeclAppType DeclAType { Ast.TyApp $1 $2 }
-
-DeclType :
-  DeclAppType { $1 }
-  | DeclType arrow DeclType { Ast.TyArrow $1 $3 }
-  | DeclType '×' DeclType
-    { Ast.TyApp (Ast.TyApp (Ast.TyName $ Id "Pair") $1) $3 }
-  | DeclType '+' DeclType
-    { Ast.TyApp (Ast.TyApp (Ast.TyName $ Id "Sum") $1) $3 }
-  | DeclType '?' { Ast.TyApp (Ast.TyName $ Id "Option") $1 }
-  | refty DeclType { Ast.TyRef $2 }
-
 Id :
   '_' { Token $1 (TokenId (Id "_")) }
   | id { $1 }
@@ -352,12 +322,11 @@ TyBinder :
   ':' Type { $2 }
 
 TyDeclBinder :
-
   -- Propagate class constraints to type variables. Doesnt avoid capture.
   -- Assumes there are no type abstractions.
-  ':' ClassConstraints fatarrow DeclType
+  ':' ClassConstraints fatarrow Type
     { Ast.propagateClassConstraints $2 $4 }
-  | ':' DeclType { $2 }
+  | ':' Type { $2 }
 
 Binder :
   '=' Term { $2 }
