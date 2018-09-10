@@ -11,6 +11,7 @@ import Ast
 import Symtab (Symtab, Id(..), empty, add, fold)
 import qualified Symtab (get)
 import Eval (eval, Value(..), Env(..))
+import Util (debugPrint)
 
 type InterpM a =
   WriterT [String] (ReaderT Env (StateT (Int, Env) Identity)) a
@@ -23,6 +24,7 @@ initState = (0, initEnv)
 -- print at the end.
 interpProg :: Prog α -> (Value, [String])
 interpProg =
+  debugPrint "interpProg" $
   runIdentity . flip evalStateT initState . flip runReaderT initEnv .
   runWriterT . interpCommands . prog_of . eraseData
 

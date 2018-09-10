@@ -16,7 +16,8 @@ module Ast (
   propagateClassConstraints, progTypeRec, TypeClass(..), ClassInstance(..),
   TySubstable(..), TypeSubst, FreeTyVars(..), tysubst', tysubstAll,
   tysubstAll', TypeConstructor(..), propagateClassConstraintsCom, mkTyAbs,
-  mkTypeConstructor, mkTypeConstructor', mapTypeConstructor, mkTyApp
+  mkTypeConstructor, mkTypeConstructor', mapTypeConstructor, mkTyApp,
+  termRec2, termSubst
   ) where
 
 
@@ -138,7 +139,7 @@ instance Arbitrary Kind where
 
 -- TODO: default implementations
 data TypeClass =
-  TypeClass { tyclass_constrs :: [Id]
+  TypeClass { tyclass_constrs :: [Id] -- superclass constraints
             , tyclass_name :: Id
             , tyclass_index :: Id
             , tyclass_methods :: [(Id, Type)]}
@@ -167,8 +168,22 @@ data ClassInstance =
                   instance_ctx :: [Id]
                 , instance_tyname :: Id
                 , instance_classname :: Id
-                , instance_ty :: Type -- for matching against
-                , instance_dict :: () }
+                
+                -- for matching against during instance resolution
+                , instance_ty :: Type
+
+                -- Gives the order in which the dictionary expects its
+                -- dictionary arguments.
+                , instance_args :: [Id]
+
+                -- Gives the order in which the methods appear in the
+                -- dictionary.
+                , instance_methods :: [Id]
+
+                -- The dictionary, when fully applied, is an n-tuple
+                -- (iterated pairs starting from unit). It may be
+                -- abstracted over other dictionaries though.
+                , instance_dict :: Term () }
   deriving Show
 
 
@@ -403,6 +418,8 @@ data Term α =
   | TmVariant α Id [Term α]
   | TmMatch α (Term α) [(Pattern, Term α)]
   | TmRecord α [(Id, Term α)]
+  -- info, class name, method name, type index
+  | TmPlaceholder α Id Id Type -- for class methods
   deriving (Eq, Foldable, Functor, Generic, Traversable)
 
 data Pattern =
@@ -454,6 +471,21 @@ termRecM f (TmRecord fi fields) =
   TmRecord fi <$> mapM (mapSndM $ termRecM f) fields >>= f
 termRecM f tm = f tm
 
+termRec2 :: Monoid a => (Term α -> a) -> Term α -> a
+termRec2 f tm@(TmAbs _ _ _ t) = f tm <> termRec2 f t
+termRec2 f tm@(TmApp _ s t) = f tm <> termRec2 f s <> termRec2 f t
+termRec2 f tm@(TmIf _ b s t) =
+ f tm <> termRec2 f b <> termRec2 f s <> termRec2 f t
+termRec2 f tm@(TmUnop _ _ t) = f tm <> termRec2 f t
+termRec2 f tm@(TmBinop _ _ s t) = f tm <> termRec2 f s <> termRec2 f t
+termRec2 f tm@(TmLet _ _ s t) = f tm <> termRec2 f s <> termRec2 f t
+termRec2 f tm@(TmVariant _ _ tms) =
+  f tm <> foldl (<>) mempty (termRec2 f <$> tms)
+termRec2 f tm@(TmMatch _ s ps) =
+  f tm <> termRec2 f s <> foldl (<>) mempty (termRec2 f . snd <$> ps)
+termRec2 f tm@(TmRecord _ fields) =
+  f tm <> foldl (<>) mempty (termRec2 f . snd <$> fields)
+termRec2 f tm = f tm
 
 -- Map a type transformer over a term.
 termTypeRec :: (Type -> Type) -> Term α -> Term α
@@ -468,6 +500,9 @@ termTypeRecM f = termRecM $
            TmAbs fi x ty tm -> pure (TmAbs fi x) <*> f ty <*> pure tm
            _ -> return tm
 
+termSubst :: Eq α => Term α -> Term α -> Term α -> Term α
+termSubst s t = termRec $
+  \tm -> if tm == t then s else tm
 
 -------------
 -- | Commands
@@ -532,7 +567,7 @@ commandTypeRecM f (CInstance fi constrs nm ty methods) =
 propagateClassConstraints :: [(Id, Id)] -> Type -> Type
 propagateClassConstraints =
   flip $ foldl $
-  \acc (x, classNm) ->
+  \acc (classNm, x) ->
     flip typeRec acc $
     \ty -> case ty of
       TyVar b ctx y ->
@@ -677,6 +712,9 @@ instance Show (Term α) where
     (intercalate " " (map show cases)) ++ ")"
   show (TmRecord _ fields) =
     "(TmRecord " ++ show fields ++ ")"
+  show (TmPlaceholder _ classNm methodNm ty) =
+    "(TmPlaceholder " ++ show classNm ++ " " ++ show methodNm ++ " "
+    ++ show ty ++ ")"
         
 instance Show α => Show (Command α) where
   show (CDecl _ s t) = "(CDecl " ++ show s ++ " " ++ show t ++ ")"
@@ -713,7 +751,7 @@ isValue (TmInt _ _)  = True
 isValue (TmChar _ _) = True
 isValue (TmVariant _ _ tms) = and $ isValue <$> tms
 isValue (TmRecord _ tms) = and $ isValue . snd <$> tms
-isValue (TmUnop _ UFix tm) = isValue tm
+isValue (TmUnop _ UFix (TmAbs _ _ _ tm)) = isValue tm
 isValue _ = False
 
 isArithBinop :: Binop -> Bool
@@ -764,6 +802,7 @@ data_of_term t =
     TmVariant fi _ _ -> fi
     TmMatch fi _ _   -> fi
     TmRecord fi _    -> fi
+    TmPlaceholder fi _ _ _ -> fi
 
 data_of_command :: Command α -> α
 data_of_command c =

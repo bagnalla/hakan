@@ -3,18 +3,19 @@
 module Context (
   Context(..), TypeScheme, unfold, instantiate_tyscheme, generalize_ty,
   mkTypeScheme, initCtx, updDecls, updGamma, open_tyscheme, updClasses,
-  typeOfTypeScheme, instantiate_tyscheme'
+  typeOfTypeScheme, instantiate_tyscheme', mkTypeScheme', generalize_ty',
+  isMethod, updInstances
   ) where
 
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.List (intercalate)
-import Data.Maybe (fromJust)
+-- import Data.Maybe (fromJust)
 
 import Ast
 import Core
 import Gensym (nextSym)
-import Symtab (Id(..), Symtab, empty, exists, get)
+import Symtab (Id(..), Symtab, empty, exists, get, assocGet, assocSet)
 import Util
 
 
@@ -78,6 +79,10 @@ updClasses :: (Symtab TypeClass -> Symtab TypeClass) ->
               Context -> Context
 updClasses f ctx = ctx { ctx_classes = f $ ctx_classes ctx }
 
+updInstances :: (Symtab [ClassInstance] -> Symtab [ClassInstance]) ->
+                Context -> Context
+updInstances f ctx = ctx { ctx_instances = f $ ctx_instances ctx }
+
 -----------------
 -- | Type schemes
 
@@ -91,51 +96,78 @@ updClasses f ctx = ctx { ctx_classes = f $ ctx_classes ctx }
 
 -- For each type variable we store its name (as bound in the type) and
 -- list of class constraints.
+
+-- tyscheme_vars tells us the dictionary arguments that the term
+-- should take, and in what order.
 data TypeScheme =
   TypeScheme { tyscheme_ty :: Type
-             , tyscheme_vars :: [(Id, [Id])] }
+             , tyscheme_vars :: [(Id, [Id])]
+             
+             -- This is so we know when to replace a method call with
+             -- a placeholder when typechecking.
+             , tyscheme_ismethod :: Bool }
   deriving Eq
 
 typeOfTypeScheme :: TypeScheme -> Type
 typeOfTypeScheme = tyscheme_ty
 
+isMethod :: TypeScheme -> Bool
+isMethod (TypeScheme { tyscheme_ismethod = b }) = b
+
 instance TySubstable TypeScheme where
-  -- tysubst b s t (TypeScheme ty) = TypeScheme $ tysubst b s t ty
   tysubst b s t tyscheme@(TypeScheme { tyscheme_ty = ty }) =
      tyscheme { tyscheme_ty = tysubst b s t ty }
 
 instance FreeTyVars TypeScheme where
-  -- freetyvars = freetyvars . unTypeScheme
     freetyvars = freetyvars . tyscheme_ty
 
 instance Show TypeScheme where
-  -- show (TypeScheme ty) = "(TypeScheme " ++ show ty ++ ")"
   show (TypeScheme { tyscheme_ty = ty, tyscheme_vars = vars }) =
     "(TypeScheme " ++ show ty ++ " (" ++
     intercalate ", " (show <$> vars) ++ "))"
 
-generalize_ty :: Type -> TypeScheme
-generalize_ty ty =
-  mkTypeScheme (map (\tyvar ->
-                       case tyvar of
-                         TyVar _ ctx nm -> (nm, ctx)
-                         _ -> error "generalize_ty: expected TyVar") $
-                 freetyvars ty) ty
+generalize_ty :: Bool -> Type -> TypeScheme
+generalize_ty ismethod ty =
+  -- mkTypeScheme (map (\tyvar ->
+  --                      case tyvar of
+  --                        TyVar _ ctx nm -> (nm, ctx)
+  --                        _ -> error "generalize_ty: expected TyVar") $
+  --                freetyvars ty) ty ismethod
+  mkTypeScheme (classConstraints $ freetyvars ty) ty ismethod
+  
+generalize_ty' :: Type -> TypeScheme
+generalize_ty' = generalize_ty False
+
+
+-- Get all of the class constraints of a list of types. Not sure if
+-- it's necessary to do it this way.. since there shouldn't be any
+-- duplicate types (and if there were, they would have the same
+-- constraints) in the places we are using this currently.
+classConstraints :: [Type] -> [(Id, [Id])]
+classConstraints = flip foldl [] $
+  \acc ty -> case ty of
+    TyVar _ ctx nm ->
+      case assocGet nm acc of
+        Just ctx' -> assocSet nm (ctx ++ ctx') acc
+        Nothing -> assocSet nm ctx acc
+    _ -> acc
+
 
 -- Build a type scheme from a list of type variables and a body type,
 -- where the variables may appear free in the body. Each variable is
 -- described by a name and a list of class constraints.
-mkTypeScheme :: [(Id, [Id])] -> Type -> TypeScheme
--- mkTypeScheme vars ty = TypeScheme { tyscheme_ty = go (fst <$> vars) ty
---                                   , tyscheme_vars = vars }
-mkTypeScheme vars ty =
+mkTypeScheme :: [(Id, [Id])] -> Type -> Bool -> TypeScheme
+mkTypeScheme vars ty ismethod =
   let x = TypeScheme { tyscheme_ty = mkTyAbs (fst <$> vars) ty
-                     , tyscheme_vars = vars } in
+                     , tyscheme_vars = vars
+                     , tyscheme_ismethod = ismethod } in
     debugPrint "\n\nmkTypeScheme" $
     debugPrint ("vars: " ++ show vars) $
     debugPrint ("ty: " ++ show ty) $
     debugPrint ("tyscheme: " ++ show x) x
 
+mkTypeScheme' :: [(Id, [Id])] -> Type -> TypeScheme
+mkTypeScheme' vars ty = mkTypeScheme vars ty False
 
 -- -- Build a type scheme from a list of Ids and a type, where the Ids
 -- -- may appear free as type variables in the body.
@@ -165,23 +197,6 @@ open_tyscheme (TypeScheme { tyscheme_ty = ty }) = go ty
 -- the Eq instance for types ignores it.
 instantiate_tyscheme :: (Show α, Num s, Show s, MonadState s m) =>
                         α -> Bool -> TypeScheme -> m Type
--- instantiate_tyscheme fi = (go >=> normalize fi) . unTypeScheme
--- instantiate_tyscheme _ = go . unTypeScheme
---   where
---     go :: (Num s, Show s, MonadState s m) => Type -> m Type
---     -- go (TyAbs x k s) = do
---     --   s' <- go s
---     --   TyApp (TyAbs x k s') <$> TyVar False . Id <$> nextSym "?Y_"
---     -- This is cool but the above version seems much easier to read
---     -- and understand.
---     go (TyAbs x k s) =
---       pure (TyApp . TyAbs x k) <*> go s <*>
---       (mkTyVar . Id <$> nextSym "?Y_")      
---     go ty = return ty
-
--- TODO: make this version work. The one below does.. which makes me
--- suspect that we just aren't building the typeschemes right
--- (tyscheme_vars needs to be correct).
 instantiate_tyscheme fi b (TypeScheme { tyscheme_ty = ty
                                       , tyscheme_vars = vars }) =
   debugPrint ("\n\n\ninstantiate_tyscheme") $
@@ -191,19 +206,6 @@ instantiate_tyscheme fi b (TypeScheme { tyscheme_ty = ty
                  TyApp acc <$> TyVar b ctx . Id <$> nextSym "?Y_")
        ty vars
   debugPrint ("x: " ++ show x) $ return x
-
--- instantiate_tyscheme _ = go . typeOfTypeScheme
---   where
---     go :: (Num s, Show s, MonadState s m) => Type -> m Type
---     -- go (TyAbs x k s) = do
---     --   s' <- go s
---     --   TyApp (TyAbs x k s') <$> TyVar False . Id <$> nextSym "?Y_"
---     -- This is cool but the above version seems much easier to read
---     -- and understand.
---     go (TyAbs x k s) =
---       pure (TyApp . TyAbs x k) <*> go s <*>
---       (mkTyVar . Id <$> nextSym "?Y_")      
---     go ty = return ty
 
 instantiate_tyscheme' :: (Show α, Num s, Show s, MonadState s m) =>
                          α -> TypeScheme -> m Type
@@ -254,10 +256,6 @@ unfold fi η (TyName nm) =
     Nothing ->
       error $ "Type error: unbound type identifier "
       ++ show nm ++ " at " ++ show fi
--- unfold fi η (TyApp ty s) =
---   let (TyAbs x _ t) = unfold fi η ty in
---     unfold fi η $ tysubst' s (mkTyVar x) t
-
 unfold fi η (TyApp ty s) =
   case unfold fi η ty of
     TyAbs x _ t ->
@@ -279,7 +277,6 @@ unfold fi η (TyApp ty s) =
                 , tycon_instantiated = unfold fi η $ TyApp t s }
     _ -> error "unfold: expected type abstraction or type constructor on \
                \left side of application"
-
 unfold fi η (TyConstructor tycon) =
   TyConstructor $ mapTypeConstructor (unfold fi η) tycon
 unfold _ _ ty = ty

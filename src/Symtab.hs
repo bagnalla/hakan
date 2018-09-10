@@ -2,17 +2,8 @@
 -- datatype for maps indexed by them.
 
 module Symtab (
-  Id(..),
-  Symtab,
-  empty,
-  add,
-  get,
-  exists,
-  keys,
-  fold,
-  Symtab.map,
-  mapi,
-  assocGet
+  Id(..), Symtab, empty, add, get, exists, keys, fold, Symtab.map, mapi,
+  assocGet, assocSet, assocUpdate
   ) where
 
 -- Use Haskell's map data structure
@@ -35,6 +26,19 @@ instance Arbitrary Id where
 assocGet :: Id -> [(Id, a)] -> Maybe a
 assocGet _ [] = Nothing
 assocGet x ((y, v) : ys) = if x == y then Just v else assocGet x ys
+
+-- Replace existing binding if it exists.
+assocSet :: Id -> a -> [(Id, a)] -> [(Id, a)]
+assocSet nm x [] = [(nm, x)]
+assocSet nm x ((nm', x'):ys) =
+  if nm == nm' then (nm, x) : ys else (nm', x') : assocSet nm x ys
+
+-- Update the value associated with an Id.
+assocUpdate :: Id -> (a -> a) -> [(Id, a)] -> [(Id, a)]
+assocUpdate nm f [] = error $ "assocUpdate: " ++ show nm ++ " not found"
+assocUpdate nm f ((nm', x):ys) =
+  if nm == nm' then (nm, f x) : ys else (nm', x) : assocUpdate nm f ys
+
 
 -- A Symtab maps Ids to values of some type
 type Symtab a = Map.Map Id a

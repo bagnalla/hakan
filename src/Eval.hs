@@ -202,6 +202,8 @@ eval (TmMatch _ discrim cases) =
         Nothing -> go cs v
     go [] _ = evalError "eval: failed to match any pattern"
 
+eval tm@(TmPlaceholder _ _ _ _) =
+  error $ "eval: unexpected placeholder: " ++ show tm
 
 -- Given a pattern, a value to match against the pattern, and an
 -- initial environment, produce an extended environment with bindings

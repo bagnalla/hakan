@@ -11,10 +11,16 @@
 -- pure f : TestClass a => a -> a
 -- def f = \x. x
 
-class TestClass a where
+class Eq a where
+  | eq : a -> a -> Bool
+
+class Eq a => TestClass a where
   | bakow : a -> Int
   | muh : a -> Bool
 
-instance TestClass Int where
-  | muh = λx. ⊥
-  | bakow = λx. x
+pure f : TestClass a => a -> Int
+def f = bakow
+
+-- instance TestClass Int where
+--   | muh = λx. ⊥
+--   | bakow = λx. x

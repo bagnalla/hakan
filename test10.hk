@@ -1,0 +1,3 @@
+
+pure f : Eq a => a -> a
+def f = \x. x
