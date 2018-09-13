@@ -32,4 +32,4 @@ nextSymN :: (Enum s, Num s, Show s, MonadState s m) =>
 nextSymN prefix n = do
   i <- get
   put $ i + n
-  return $ map ((++) prefix . show) [i..i+n]
+  return $ map ((++) prefix . show) [i..i+n-1]

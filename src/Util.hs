@@ -2,6 +2,7 @@ module Util where
 
 import Data.Bifunctor
 import Data.List (isInfixOf)
+import Data.Maybe (catMaybes, listToMaybe)
 import Debug.Trace (trace)
 import System.IO.Unsafe
 
@@ -42,12 +43,13 @@ allEq (x:xs) = all (== x) xs
 isPermutationOf :: Eq a => [a] -> [a] -> Bool
 isPermutationOf xs ys = length xs == length ys && all (`elem` ys) xs
 
+firstJust :: [Maybe a] -> Maybe a
+firstJust = listToMaybe . catMaybes
 
-class Test a where
-  test :: a -> ()
+removeLast :: [a] -> [a]
+removeLast [] = error "removeLast: empty list"
+removeLast l = take (length l - 1) l
 
-instance (Num a, Num b) => Test ((->) a b) where
-  test = const ()
-
--- instance (Num a) => Test ((->) a) where
---   test = const ()
+-- Better name?
+flattenSnd :: [(a, [b])] -> [(a, b)]
+flattenSnd = concat . fmap (\(x, ys) -> zip (repeat x) ys)

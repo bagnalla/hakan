@@ -4,7 +4,7 @@ module Context (
   Context(..), TypeScheme, unfold, instantiate_tyscheme, generalize_ty,
   mkTypeScheme, initCtx, updDecls, updGamma, open_tyscheme, updClasses,
   typeOfTypeScheme, instantiate_tyscheme', mkTypeScheme', generalize_ty',
-  isMethod, updInstances
+  isMethod, updInstances, classConstraints, normalize_ty, ctxOfTypeScheme
   ) where
 
 import Control.Monad.Reader
@@ -111,6 +111,9 @@ data TypeScheme =
 typeOfTypeScheme :: TypeScheme -> Type
 typeOfTypeScheme = tyscheme_ty
 
+ctxOfTypeScheme :: TypeScheme -> [(Id, [Id])]
+ctxOfTypeScheme = tyscheme_vars
+
 isMethod :: TypeScheme -> Bool
 isMethod (TypeScheme { tyscheme_ismethod = b }) = b
 
@@ -166,8 +169,12 @@ mkTypeScheme vars ty ismethod =
     debugPrint ("ty: " ++ show ty) $
     debugPrint ("tyscheme: " ++ show x) x
 
-mkTypeScheme' :: [(Id, [Id])] -> Type -> TypeScheme
-mkTypeScheme' vars ty = mkTypeScheme vars ty False
+-- mkTypeScheme' :: [(Id, [Id])] -> Type -> TypeScheme
+-- mkTypeScheme' vars ty = mkTypeScheme vars ty False
+
+mkTypeScheme' :: Type -> TypeScheme
+mkTypeScheme' ty =
+  mkTypeScheme (classConstraints $ freetyvars ty) ty False
 
 -- -- Build a type scheme from a list of Ids and a type, where the Ids
 -- -- may appear free as type variables in the body.
@@ -198,10 +205,10 @@ open_tyscheme (TypeScheme { tyscheme_ty = ty }) = go ty
 instantiate_tyscheme :: (Show α, Num s, Show s, MonadState s m) =>
                         α -> Bool -> TypeScheme -> m Type
 instantiate_tyscheme fi b (TypeScheme { tyscheme_ty = ty
-                                      , tyscheme_vars = vars }) =
-  debugPrint ("\n\n\ninstantiate_tyscheme") $
-  debugPrint ("ty: " ++ show ty) $
-  debugPrint ("vars: " ++ show vars) $ do
+                                      , tyscheme_vars = vars }) = do
+  -- debugPrint ("\n\n\ninstantiate_tyscheme") $
+  -- debugPrint ("ty: " ++ show ty) $
+  -- debugPrint ("vars: " ++ show vars) $ do
   x <- foldM (\acc (nm, ctx) ->
                  TyApp acc <$> TyVar b ctx . Id <$> nextSym "?Y_")
        ty vars
@@ -248,6 +255,11 @@ instantiate_tyscheme' fi = instantiate_tyscheme fi False
 --       --           , tycon_instantiated = tysubst' s (mkTyVar x) t }
 --       _ -> resolveTyNames fi η ty
 
+normalize_ty :: Type -> Type
+normalize_ty = typeRec $
+  \ty -> case ty of
+    TyApp (TyAbs x _ t) s -> tysubst' s (mkTyVar x) t
+    _ -> ty
 
 unfold :: Show α => α -> Symtab TypeScheme -> Type -> Type
 unfold fi η (TyName nm) =

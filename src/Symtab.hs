@@ -3,7 +3,7 @@
 
 module Symtab (
   Id(..), Symtab, empty, add, get, exists, keys, fold, Symtab.map, mapi,
-  assocGet, assocSet, assocUpdate
+  assocGet, assocSet, assocUpdate, assocIndex
   ) where
 
 -- Use Haskell's map data structure
@@ -39,6 +39,10 @@ assocUpdate nm f [] = error $ "assocUpdate: " ++ show nm ++ " not found"
 assocUpdate nm f ((nm', x):ys) =
   if nm == nm' then (nm, f x) : ys else (nm', x) : assocUpdate nm f ys
 
+assocIndex :: Id -> [(Id, a)] -> Maybe Int
+assocIndex nm ((x, _):xs) =
+  if nm == x then Just 0 else (+ 1) <$> assocIndex nm xs
+assocIndex nm [] = Nothing
 
 -- A Symtab maps Ids to values of some type
 type Symtab a = Map.Map Id a

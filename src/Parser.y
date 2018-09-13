@@ -9,6 +9,7 @@ module Parser( parseProg ) where
 
 import Lexer
 import qualified Ast
+import Data.Tuple (swap)
 import Symtab (Id(..))
 import Ast (data_of_term)
 }
@@ -223,15 +224,13 @@ ATerm :
   | "π₁" { Ast.TmVar $1 (Id "proj1") }
   | "π₂" { Ast.TmVar $1 (Id "proj2") }
   | '(' Term ')' { $2 }
---  | '(' Term ',' Term ')' { Ast.TmVariant $1 (Id "Pair") [$2, $4] }
-  | '(' Term ',' Term ')'
-    { Ast.TmApp $1 (Ast.TmApp $1 (Ast.TmVar $1 (Id "Pair")) $2) $4 }
+  | '(' Term ',' Term ')' { Ast.mkPair $1 $2 $4 }
   | '[' Term ',' Term ']'
     { Ast.TmApp $1 (Ast.TmApp $1 (Ast.TmVar $1 (Id "cotuple")) $2) $4 }
   | '⟨' Term ',' Term '⟩'
     { Ast.TmApp $1 (Ast.TmApp $1 (Ast.TmVar $1 (Id "tuple")) $2) $4 }
-  | ATerm '₁' { Ast.TmApp $2 (Ast.TmVar $2 (Id "proj1")) $1 }
-  | ATerm '₂' { Ast.TmApp $2 (Ast.TmVar $2 (Id "proj2")) $1 }
+  | ATerm '₁' { Ast.mkProj1 $2 $1 }
+  | ATerm '₂' { Ast.mkProj2 $2 $1 }
   | '{' seplist(Field, ',') '}' { Ast.TmRecord $1 $2 }
 
 Field :
@@ -304,7 +303,7 @@ Command :
       { Ast.CClass $1 [] (idFromToken $2) (idFromToken $3) $5 }
   | instance ClassConstraints fatarrow capid Type
     where barlist(InstanceMethod)
-      { Ast.CInstance $1 (map fst $2) (idFromToken $4) $5 $7 }
+      { Ast.CInstance $1 (map swap $2) (idFromToken $4) $5 $7 }
   | instance capid Type where barlist(InstanceMethod)
       { Ast.CInstance $1 [] (idFromToken $2) $3 $5 }
 

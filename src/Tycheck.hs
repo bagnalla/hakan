@@ -19,8 +19,8 @@ import Data.Maybe (fromJust)
 
 import Ast
 import Core (kindCheck)
-import Gensym (nextSym)
-import Symtab (Id(..), add, get, assocGet, Symtab)
+import Gensym (nextSym, nextSymN)
+import Symtab (Id(..), add, get, assocGet, assocIndex, Symtab)
 import Context
 import Unify (ConstrSet, unify)
 import Util
@@ -28,7 +28,7 @@ import Util
 -- TODO: Type synonyms and newtypes.
 
 
----------------------------------------------
+------------------------------------------------
 -- | The type of metadata for typechecked terms.
 
 newtype TyData = TyData { unTyData :: Type }
@@ -48,7 +48,7 @@ instance TySubstable TyData where
   tysubst b s t fi = TyData (tysubst b s t (unTyData fi))
 
 
------------------
+----------------
 -- | Typechecker
 
 type TycheckM a =
@@ -71,7 +71,6 @@ tryUnify :: Show α => α -> ConstrSet -> (TypeSubst -> TycheckM a) ->
 tryUnify fi c f = do
   η <- asks ctx_datatypes
   ψ <- asks ctx_instances
-  -- case unify fi η ψ $ bimap (normalize fi η) (normalize fi η) <$> c of
   case unify fi η ψ c of
     Left (s, t, msg) -> unifyError s t fi msg
     Right tsubst ->
@@ -84,23 +83,28 @@ tycheckTerm :: Show α => Term α -> TycheckM (Term TyData, ConstrSet)
 -- with a placeholder to be filled in later with a selector for the
 -- resolved instance.
 tycheckTerm (TmVar fi x) =
-  debugPrint "TmVar" $ do
+  debugPrint "\nTmVar" $ do
   tyscheme <- asks $ Symtab.get x . ctx_gamma
-  -- classNm <- asks $ tyclass_name . fromJust . Symtab.get x . ctx_methods
-  cls <- asks $ Symtab.get x . ctx_methods
-  temp <- asks ctx_methods
-  debugPrint (show x) $
-    debugPrint (show temp) $
-    case (cls, tyscheme) of
-      (Just (TypeClass { tyclass_name = classNm }), Just tyscheme') -> do
+  debugPrint ("x: " ++ show x) $
+    debugPrint ("tyscheme: " ++ show tyscheme) $ do
+    cls <- asks $ Symtab.get x . ctx_methods
+    methods <- asks ctx_methods
+    case tyscheme of
+      Just tyscheme' -> do
         ty <- instantiate_tyscheme' fi tyscheme'
-        debugPrint ("var nm: " ++ show x) $
-          debugPrint ("var tyscheme: " ++ show tyscheme') $
-          return (if isMethod tyscheme' then
-                    TmPlaceholder (mkData ty) classNm x ty
-                  else
-                    TmVar (mkData ty) x,
-                  [])
+        if isMethod tyscheme' then
+          case cls of
+            Just (TypeClass { tyclass_name = classNm
+                            , tyclass_index = classTyIndex }) -> do
+              let open = open_tyscheme tyscheme'
+              let tyIndex = fromJust $
+                            match_type classTyIndex (normalize_ty ty) open
+              return (TmPlaceholder (mkData ty) classNm x tyIndex, [])
+            _ ->
+              throwError $ "Type error: class not found for method "
+              ++ show x
+          else
+          return (TmVar (mkData ty) x, [])
       _ ->
         throwError $ "Type error: unbound identifier " ++ show x ++
         " at " ++ show fi
@@ -108,7 +112,7 @@ tycheckTerm (TmVar fi x) =
 tycheckTerm (TmAbs fi x ty tm) =
   debugPrint "TmAbs" $ do
   ty' <- wellKinded fi ty
-  (tm', c) <- local (updGamma $ add x $ mkTypeScheme' [] ty') $
+  (tm', c) <- local (updGamma $ add x $ mkTypeScheme' ty') $
               tycheckTerm tm
   let ty'' = ty_of_term tm'
   debugPrint ("abs nm: " ++ show x) $
@@ -231,8 +235,8 @@ tycheckTerm (TmBinop fi b t1 t2) =
   let ty2 = ty_of_term t2'
   let c = c1 ++ c2 ++
           if isBUpdate b then [(ty1, TyRef ty2)]
-          else if isArithBinop b then [(ty1, ty2), (ty1, TyInt)]
-          else if isComparisonBinop b then [(ty1, ty2), (ty1, TyBool)]
+          else if isArithBinop b || b == BEq then [(ty1, ty2), (ty1, TyInt)]
+          else if isBooleanBinop b then [(ty1, ty2), (ty1, TyBool)]
           else []
   tryUnify fi c $
     \tsubst ->
@@ -242,23 +246,23 @@ tycheckTerm (TmBinop fi b t1 t2) =
 tycheckTerm (TmLet fi x tm1 tm2) =
   debugPrint "TmLet" $ do
   (tm1', c1) <- tycheckTerm tm1
-  ctx <- ask
-  let (tm1'', tyscheme) = generalize_term ctx tm1'
-  debugPrint ("tyscheme: " ++ show tyscheme ++ "\n") $ do
-    (tm2', c2) <- local (updGamma $ add x tyscheme)  $
-                  tycheckTerm tm2
-    let c = c1 ++ c2
-    tryUnify fi c $
-      \tsubst ->
-        return (tysubstAll' tsubst $
-                TmLet (mkData $ ty_of_term tm2') x tm1'' tm2', c)
+  tryUnify fi c1 $
+    \tsubst -> do
+      ctx <- ask
+      let (tm1'', tyscheme) = generalize_term ctx $ tysubstAll' tsubst tm1'
+      debugPrint ("tyscheme: " ++ show tyscheme ++ "\n") $ do
+        (tm2', c2) <- local (updGamma $ add x tyscheme)  $
+                      tycheckTerm tm2
+        let c = c1 ++ c2
+        tryUnify fi c $
+          \tsubst' ->
+            return (tysubstAll' tsubst' $
+                    TmLet (mkData $ ty_of_term tm2') x tm1'' tm2', c)
 
 -- Not sure that we need this since TmVariants don't appear in the
--- syntax of the program, only as intermediate terms generated by the
--- interpreter.
--- tycheckTerm (TmVariant fi x tms) = do
---   (tms', cs) <- unzip <$> mapM tycheckTerm tms
---   error ""
+-- syntax of the program (the programmer creates them via application
+-- of constructor functions), only as intermediate terms generated by
+-- the interpreter.
 tycheckTerm (TmVariant _ _ _) =
   throwError "unexpected TmVariant in typechecker"
 
@@ -273,7 +277,7 @@ tycheckTerm (TmMatch fi discrim cases) =
                (tm', cs') <-
                  local (updGamma $
                          flip (foldl (\acc (x, t) ->
-                                        add x (mkTypeScheme' [] t) acc)) binds)
+                                        add x (mkTypeScheme' t) acc)) binds)
                  $ tycheckTerm tm
                return (ty, binds, cs ++ cs', tm')) cases
     debugPrint "TmMatch 3\n" $
@@ -311,8 +315,6 @@ tycheckTerm (TmRecord fi fields) = do
   y <- unfold fi η <$> instantiate_tyscheme' fi x
   debugPrint ("\nx: " ++ show x) $
     debugPrint ("\ny: " ++ show y ++ "\n") $ do
-  
-  -- recordTy@(TyRecord recordNm _ recordFields) <-
     recordTy@(TyConstructor (TypeConstructor
                              { tycon_instantiated =
                                  TyRecord recordNm _ recordFields })) <-
@@ -358,10 +360,26 @@ tycheckCommand (CLet fi x t) =
         -- this tysubst on t' isn't doing quite what we want since it
         -- doesn't affect the type metadata... so we also fmap the
         -- tysubst over it. TODO: make it nicer somehow.
+        -- Or at least factor it out into an operation.
 
-tycheckCommand (CEval _ tm) = do
-  (tm', _) <- tycheckTerm tm
-  return $ CEval (mkData $ ty_of_term tm') tm'
+tycheckCommand (CEval fi tm) = do
+  ctx <- ask
+  (tm', c) <- tycheckTerm tm
+  tryUnify fi c $
+    \tsubst ->
+      debugPrint "\nCEval" $
+      debugPrint ("tm: " ++ show tm) $
+      debugPrint ("tm': " ++ show tm') $
+      debugPrint ("c: " ++ show c) $
+      debugPrint ("tsubst: " ++ show tsubst) $
+      debugPrint ("tm' substed: " ++ show (tysubstAll' tsubst <$>
+                                           tysubstAll' tsubst tm')) $
+      debugPrint ("CEval tm'': " ++ show (fst $ generalize_term ctx $
+                                          tysubstAll' tsubst <$>
+                                          tysubstAll' tsubst tm')) $ do
+      let (tm'', _) = generalize_term ctx $ tysubstAll' tsubst <$>
+                      tysubstAll' tsubst tm'
+      return $ CEval (mkData $ ty_of_term tm'') tm''
 
 tycheckCommand (CData _ nm tyvars ctors) =
   return $ CData (mkData TyUnit) nm tyvars ctors
@@ -419,8 +437,10 @@ tycheckCommand (CInstance fi constrs nm ty methods) = do
                        " doesn't implement the method " ++ show methodNm ++
                        " at " ++ show fi)
           clsMethods
-        tryUnify fi (c ++ c') $
+        debugPrint ("\n\nZZZZZZZZZZ\nc': " ++ show c') $
+          tryUnify fi (c ++ c') $
           \tsubst ->
+            debugPrint ("tsubst: " ++ show tsubst) $
             return $ tysubstAll' tsubst $
             CInstance (mkData TyUnit) constrs nm ty methods'
         else
@@ -460,6 +480,7 @@ tycheckCommands (com:coms) = do
           -- Ignore the result of unifying the type schemes since we
           -- want to use the exact type declared by the programmer.
           _ <- unify_tyschemes (data_of_command com) tyscheme declTyscheme
+          -- let (tm', tyscheme) = generalize_term ctx $ tysubstAll' tsubst tm
           debugPrint "CLet 4" $
             debugPrint ("tyscheme: " ++ show tyscheme) $
             debugPrint ("declTyscheme: " ++ show declTyscheme) $ do
@@ -478,8 +499,8 @@ tycheckCommands (com:coms) = do
       let ty = mkTypeConstructor' nm tyvars (const KStar <$> tyvars) $
                TyVariant nm (mkTyVar <$> tyvars) ctors
       debugPrint (show ty) $ do
-        let tyscheme = mkTypeScheme' (zip tyvars $ repeat []) $
-                       mkTyApp ty $ mkTyVar <$> tyvars
+        let tyscheme = mkTypeScheme (zip tyvars $ repeat [])
+                       (mkTyApp ty $ mkTyVar <$> tyvars) False
         let open = open_tyscheme tyscheme
         debugPrint ("nm: " ++ show nm) $
           debugPrint ("ctors: " ++ show ctors) $
@@ -488,8 +509,8 @@ tycheckCommands (com:coms) = do
           debugPrint ("open: " ++ show open) $ do
           ctorFuns <-
             mapM (mapSndM $ \ctorTys ->
-                     return $ mkTypeScheme' (zip tyvars $ repeat []) $
-                     mkArrowType $ ctorTys ++ [open]) ctors
+                     return $ mkTypeScheme (zip tyvars $ repeat [])
+                     (mkArrowType $ ctorTys ++ [open]) False) ctors
           let fvs = nub $ concat $ map (freetyvars . snd) ctors
           if not $ all (`elem` map mkTyVar tyvars) fvs then
             throwError $ "Type error : free type variable in definition of "
@@ -526,8 +547,8 @@ tycheckCommands (com:coms) = do
                       Nothing -> return ()) $ fst $ unzip fields
       let ty = mkTypeConstructor' nm tyvars (const KStar <$> tyvars) $
                TyRecord nm (mkTyVar <$> tyvars) fields
-      let tyscheme = mkTypeScheme' (zip tyvars $ repeat []) $
-                     mkTyApp ty $ mkTyVar <$> tyvars
+      let tyscheme = mkTypeScheme (zip tyvars $ repeat [])
+                     (mkTyApp ty $ mkTyVar <$> tyvars) False
       let open = open_tyscheme tyscheme
       debugPrint ("nm: " ++ show nm) $
         debugPrint ("fields: " ++ show fields) $
@@ -537,8 +558,8 @@ tycheckCommands (com:coms) = do
         fieldFuns <- mapM (mapSndM $ \fieldTy ->
                               -- mkTypeScheme' tyvars <$> (normalize fi $
                               --   tysubst' ty (TyVar False nm) $
-                              return $ mkTypeScheme' (zip tyvars $ repeat []) $
-                              TyArrow open fieldTy)
+                              return $ mkTypeScheme (zip tyvars $ repeat [])
+                              ( TyArrow open fieldTy) False)
                      fields
         let fvs = concat $ map (freetyvars . snd) fields
         if not $ all (`elem` (mkTyVar <$> tyvars)) fvs then
@@ -580,14 +601,28 @@ tycheckCommands (com:coms) = do
                 -- Add methods to γ
                 , ctx_gamma =
                     foldl (\acc (nm, ty) ->
-                              Symtab.add nm
-                              (generalize_ty True
+                             -- debugPrint ("\n\nASDF") $
+                             -- debugPrint ("classNm: " ++ show classNm) $
+                             -- debugPrint ("nm: " ++ show nm) $
+                             -- debugPrint ("constrs: " ++ show constrs) $
+                             -- debugPrint ("ty: " ++ show ty) $
+                             -- debugPrint (show $
+                             --             (zip (repeat tyIndex)
+                             --              (classNm : constrs))) $
+                             -- debugPrint
+                             -- ("ty': " ++
+                             --   show (propagateClassConstraints
+                             --          (zip (classNm : constrs)
+                             --           (repeat tyIndex)) ty)) $
+                             Symtab.add nm
+                             (generalize_ty True
                                -- Include superclass constraints as well
                                (propagateClassConstraints
-                                 (zip (repeat nm) constrs) ty)) acc)
+                                 (zip (classNm : constrs)
+                                  (repeat tyIndex)) ty)) acc)
                     (ctx_gamma ctx) methods } ) $ do
-      coms' <- tycheckCommands coms
-      return $ com' : coms'
+        coms' <- tycheckCommands coms
+        return $ com' : coms'
 
     -- TODO: build dictionary and add instance to the context.
     -- The dictionary itself should be parameterized by other
@@ -603,21 +638,45 @@ tycheckCommands (com:coms) = do
     CInstance _ constrs classNm ty methods -> do
       ctx <- ask
       let generalized = mapSnd (generalize_term ctx) <$> methods
-      local (updInstances $ \ψ ->
-                Symtab.add classNm (buildInstance :
-                                    case Symtab.get classNm ψ of
-                                      Just instances -> instances
-                                      Nothing -> []) ψ) $ do
-        coms' <- tycheckCommands coms
-        return $ com' : coms'
+      case Symtab.get classNm $ ctx_classes ctx of
+        Just (TypeClass { tyclass_constrs = class_constrs
+                        , tyclass_index = tyIndex }) -> do
+          inst <- buildInstance (zip class_constrs (repeat tyIndex)
+                                 ++ constrs) classNm ty methods
+          local (updInstances $ \ψ ->
+                    Symtab.add classNm
+                    (inst :
+                      case Symtab.get classNm ψ of
+                        Just instances -> instances
+                        Nothing -> []) ψ) $ do
+            coms' <- tycheckCommands coms
+            return $ com' : coms'
+        Nothing -> throwError $ "class " ++ show classNm ++ " not found"
 
     _ -> do
       coms' <- tycheckCommands coms
       return $ com' : coms'
 
 
-buildInstance :: ClassInstance
-buildInstance = undefined
+buildInstance :: [(Id, Id)] -> Id -> Type -> [(Id, Term α)] ->
+                 TycheckM ClassInstance
+buildInstance constrs classNm ty methods =
+  debugPrint ("\nbuildInstance") $
+  debugPrint ("constrs: " ++ show constrs) $
+  debugPrint ("classNm: " ++ show classNm) $
+  debugPrint ("ty: " ++ show ty) $
+  debugPrint ("methods: " ++ show methods) $ do
+  vars <- fmap Id <$> (nextSymN "?Y_" $ length constrs)
+  let dict = mkAbs vars $ mkTuple $
+             flip mkApp (TmVar () <$> vars) <$>
+             (eraseData . snd <$> methods)
+  debugPrint ("\nvars: " ++ show vars) $
+    debugPrint ("dict: " ++ show dict) $
+    return $ ClassInstance { instance_ctx = constrs
+                           , instance_classname = classNm
+                           , instance_ty = ty -- ?
+                           , instance_dict = dict }
+
 
 tycheckProg :: Show α => Prog α -> TycheckM (Prog TyData)
 tycheckProg p = do
@@ -636,54 +695,97 @@ ty_of_term = unTyData . data_of_term
 -- only generalize the type when then term is a syntactic value. See
 -- TAPL or Xavier Leroy's PhD thesis.
 
--- TODO: resolve instances here, possibly modifying the term to take
--- extra dictionary arguments (which also changes its type..) and
--- substituting method selectors for placeholders.
+-- TODO: we also need to scan for terms with constraints (hmmm) and
+-- apply them to dictionary arguments similar to when we fill
+-- placeholders.
 
--- I guess we first scan the term for all placeholders... also note
--- that any term that isn't polymorphic shouldn't require dictionary
--- arguments since all of its types are known.
-
--- Then we need to replace each placeholder with either 1) an instance
--- method, 2) a selector, or 3) a combination of both (e.g.,
--- application of an instance method to a selector in the case of type
--- constructors). I guess this operation that folds over the
--- placeholders and substitutes for them in the term can accumulate
--- the list of classes needed for type variables which can then be
--- added as dictionary arguments afterward. We should be able to use a
--- naming scheme like ?dict_MyClass_a for the dictionary argument
--- corresponding to the MyClass instance for type variable a.
-
--- TODO: compute placeholder stuff before the typescheme so we can
--- pass dictargs to generalize_ty and mkTypeScheme.
 generalize_term :: Context -> Term TyData -> (Term TyData, TypeScheme)
 generalize_term ctx tm =
+  debugPrint "\ngeneralize_term" $
+  -- debugPrint ("ctx: " ++ show ctx) $
   let placeholders = get_placeholders tm
       -- Fold over the placeholders, replacing them with the necessary
       -- instances or selectors in the term and accumulating a list of
       -- (class name, type index) pairs of the necessary dictionary
-      -- arguments.
+      -- arguments. These should probably correspond exactly to the
+      -- constraints computed by looking at the free variables in the
+      -- type scheme... we should check this. Actually, I think they
+      -- should just be a subset of the constraints in the type since
+      -- we conservatively include everything in the type but the
+      -- actual term may not use some of them. So, we actually want to
+      -- use the constraints from the type when abstracting over
+      -- dictionary arguments.
       (classes, tm') =
         foldl (\(classes, acc) p@(TmPlaceholder fi classNm methodNm ty) ->
                   ((classNm, ty) : classes,
-                    termSubst (mkData TyUnit <$
-                                resolve_method (ctx_instances ctx) classNm ty)
+                    termSubst (mkData (ty_of_term p) <$
+                                fill_placeholder
+                                (ctx_instances ctx)
+                                (fromJust $ Symtab.get classNm $
+                                 ctx_classes ctx) methodNm ty)
                     p acc))
         ([], tm) placeholders
-      ty = ty_of_term tm
-      tyscheme = if isValue tm then debugPrint ("IS VALUE: " ++ show tm) $
-                                    generalize_ty' ty
-                 else debugPrint ("IS NOT VALUE: " ++ show tm) $
-                      mkTypeScheme' [] ty
+      ty = ty_of_term tm'
+      tyscheme = if isValue tm' then debugPrint ("IS VALUE: " ++ show tm') $
+                                     generalize_ty' ty
+                 else debugPrint ("IS NOT VALUE: " ++ show tm') $
+                      mkTypeScheme' ty
+      spec = specialize_term ctx tm'
   in
-    (tm, tyscheme)
+    debugPrint ("\nclasses from term: " ++ show classes) $
+    debugPrint ("classes from type: " ++
+                show (classConstraints $ freetyvars ty)) $
+    debugPrint ("placeholders: " ++ show placeholders) $
+    debugPrint ("tm: " ++ show tm) $
+    debugPrint ("tm': " ++ show tm') $
+    debugPrint ("spec: " ++ show spec) $
+    debugPrint ("ty: " ++ show ty) $
+    debugPrint ("tyscheme: " ++ show tyscheme) $
+    -- generalize the term by abstracting over dictionary
+    -- arguments. Should only need those corresponding to
+    -- uninstantiated type variables.
+    let args = fmap (\(var, classNm) ->
+                       Id $ "?" ++ show classNm ++ "_" ++ show var) $
+               flattenSnd $ classConstraints $ freetyvars ty
+        tm'' = mkAbs args spec
+    in
+      debugPrint ("\nargs: " ++ show args) $
+      debugPrint ("tm'': " ++ show tm'') $
+      (tm'', tyscheme)
 
 
--- get_placeholders :: Term TyData -> [(Id, Id, Type)]
--- get_placeholders = (.) nub $ termRec2 $
---   \tm -> case tm of
---     TmPlaceholder _ classNm methodNm ty -> [(classNm, methodNm, ty)]
---     _ -> []
+specialize_term :: Context -> Term TyData -> Term TyData
+specialize_term ctx = termRec $
+  \tm -> case tm of
+    TmVar _ x ->
+      case Symtab.get x $ ctx_gamma ctx of
+        Just tyscheme ->
+          let ty = normalize_ty $ ty_of_term tm
+              open = open_tyscheme tyscheme
+              match = nub $ typesRec (\s t ->
+                                        case t of
+                                          TyVar _ constrs _ ->
+                                            zip (repeat s) constrs
+                                          _ -> []) ty open
+              insts = uncurry (resolve_instance (ctx_instances ctx)) <$>
+                      match
+              result = mkApp tm $ (mkData TyUnit <$) <$> insts
+          in
+            debugPrint ("spec tm: " ++ show tm) $
+            debugPrint ("spec ty: " ++ show ty) $
+            debugPrint ("spec tyscheme: " ++ show tyscheme)
+            debugPrint ("spec tyscheme_ty: " ++
+                        show (typeOfTypeScheme tyscheme))
+            debugPrint ("spec open: " ++ show open) $
+            debugPrint ("spec ctx: " ++ show (ctxOfTypeScheme tyscheme)) $
+            debugPrint ("spec match: " ++ show match) $
+            debugPrint ("spec instances: " ++ show insts) $
+            debugPrint ("spec instances: " ++ show insts) $
+            debugPrint ("spec result: " ++ show result) $
+            result
+        Nothing -> tm
+    _ -> tm
+
 
 get_placeholders :: Term TyData -> [Term TyData]
 get_placeholders = (.) nub $ termRec2 $
@@ -692,56 +794,68 @@ get_placeholders = (.) nub $ termRec2 $
     _ -> []
 
 
--- TODO: maybe we should write the CInstance code that generates
--- dictionaries first. We can make the entire dictionary parameterized
--- by the dictionaries corresponding to the instance's class
--- constraints (including superclass constraints I think). Then this
--- becomes a relatively straightfoward recursive dictionary building
--- algorithm for resolving instances.
-
--- instance context, class name, type index
-resolve_method :: Symtab [ClassInstance] -> Id -> Type -> Term ()
-resolve_method = undefined
-
--- instance context, class name, method name (if nothing then we just
--- want the whole instance dictionary, otherwise generate a selector
--- to grab the method), type index
--- resolve_method :: Symtab [ClassInstance] -> Id -> Maybe Id -> Type ->
---                   Term ()
--- resolve_method ctx classNm methodNm ty =
---   case Symtab.get classNm ctx of
---     Just instances ->
---       fromJust $
---       foldl (\acc inst ->
---                case acc of
---                  Just _ -> acc
---                  Nothing ->
---                    let dict = Just $
---                          go inst methodNm ty (instance_ty inst) in
---                      dict
---             ) Nothing instances
---     Nothing -> error ""
---   where
---     go :: ClassInstance -> Maybe Id -> Type -> Type -> Term ()
-    
---     go inst methodNm TyUnit TyUnit =
---       gen_selector methodNm $ instance_dict inst
---     go inst methodNm TyBool TyBool =
---       gen_selector methodNm $ instance_dict inst
---     go inst methodNm TyInt  TyInt  =
---       gen_selector methodNm $ instance_dict inst
---     go inst methodNm TyChar TyChar =
---       gen_selector methodNm $ instance_dict inst
-
---     go inst methodNm (TyRef s) (TyRef t) =
---       let arg = resolve_method ctx Nothing s t in
---         undefined
-    
---     go _ _ _ _ = undefined
+-- instance context, class, method name, type index
+fill_placeholder :: Symtab [ClassInstance] -> TypeClass -> Id -> Type ->
+                    Term ()
+fill_placeholder ψ cls@(TypeClass { tyclass_name = classNm
+                                  , tyclass_methods = classMethods })
+  methodNm tyIndex =
+  let index = fromJust $ assocIndex methodNm classMethods in
+    mkTupleProjection index (length classMethods) $
+    resolve_instance ψ tyIndex classNm
 
 
-gen_selector :: Maybe Id -> Term () -> Term ()
-gen_selector = undefined
+-- instance context, type, class name
+resolve_instance :: Symtab [ClassInstance] -> Type -> Id -> Term ()
+resolve_instance ψ ty classNm =
+  case ty of
+    -- When it's a variable, just make a variable and apply it to
+    -- other variables created for the superclass constraints.
+    TyVar _ constrs x ->
+      debugPrint ("\nresolve_instance ty: " ++ show ty) $
+      debugPrint ("resolve_instance classNm: " ++ show classNm) $
+      debugPrint ("resolve_instance constrs: " ++ show constrs) $
+      mkApp (TmVar () $ Id $ "?" ++ show classNm ++ "_" ++ show x) $
+      fmap (\constr -> TmVar () $ Id $ "?" ++
+             show constr ++ "_" ++ show x) $
+      removeLast constrs
+    -- When it's not a variable, recursively resolve, inlining
+    -- instances or doing the above for variables. We must try
+    -- resolving with all known instances of the class until one
+    -- works.
+    _ ->
+      case Symtab.get classNm ψ of
+        Just instances ->
+          fromJust $ firstJust $
+          fmap (\inst ->
+                  -- debugPrint "\n\nAAAAAAAAAAAAAAAAAAAAAAA" $
+                  -- debugPrint (show $ instance_ctx inst) $
+                  -- debugPrint (show $ instance_ty inst) $
+                  -- go (removeLast $ instance_ctx inst)
+                   go (instance_ctx inst) (instance_dict inst) ty
+                   (instance_ty inst)) instances
+        Nothing ->
+          debugPrint ("\nψ: " ++ show ψ) $
+          error $ "resolve_instance: no known instances for class "
+          ++ show classNm
+  where
+
+    go :: [(Id, Id)] -> Term () -> Type -> Type -> Maybe (Term ())
+
+    go constrs dict s t
+      | compatible s t =
+        Just $ mkApp dict $
+        fmap (\(classNm, tyvar) ->
+                case match_type tyvar s t of
+                  Just ty' ->
+                    resolve_instance ψ ty' classNm
+                  Nothing ->
+                    error $ "resolve_instance: unused constraint " ++
+                    show (classNm, tyvar))
+        constrs
+
+    go _ _ _ _ = Nothing
+
 
 -- The first type scheme argument should be that obtained from
 -- typechecking the body of a let command, and the second should be
@@ -754,16 +868,16 @@ unify_tyschemes fi tyscheme1 tyscheme2 = do
   ty1 <- instantiate_tyscheme fi False tyscheme1
   -- Hold type variables of this one rigid.
   ty2 <- instantiate_tyscheme fi True tyscheme2
-  debugPrint "\nunify_tyschemes" $
-    debugPrint ("tyscheme1: " ++ show tyscheme1) $
-    debugPrint ("tyscheme2: " ++ show tyscheme2) $
-    debugPrint ("ty1: " ++ show ty1) $
-    debugPrint ("ty2: " ++ show ty2) $
-    case unify fi η ψ [(ty1, ty2)] of
-      Left (s, t, msg) -> unifyError s t fi msg
-      Right tsubst ->
-        debugPrint ("tsubst: " ++ show tsubst ++ "\n") $
-        return $ tysubstAll' tsubst ty1
+  -- debugPrint "\nunify_tyschemes" $
+  --   debugPrint ("tyscheme1: " ++ show tyscheme1) $
+  --   debugPrint ("tyscheme2: " ++ show tyscheme2) $
+  --   debugPrint ("ty1: " ++ show ty1) $
+  --   debugPrint ("ty2: " ++ show ty2) $
+  case unify fi η ψ [(ty1, ty2)] of
+    Left (s, t, msg) -> unifyError s t fi msg
+    Right tsubst ->
+      -- debugPrint ("tsubst: " ++ show tsubst ++ "\n") $
+      return $ tysubstAll' tsubst ty1
   
 
 set_rigid :: Bool -> Type -> Type

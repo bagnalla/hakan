@@ -30,7 +30,7 @@ executable hakan-exe
   hs-source-dirs:      app
   main-is:             Main.hs
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N -Wall -O2
-                       -ddump-simpl-stats
+                       -- -ddump-simpl-stats
   build-depends:       base
                      , hakan
                      , array

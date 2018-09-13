@@ -11,16 +11,50 @@
 -- pure f : TestClass a => a -> a
 -- def f = \x. x
 
+
+data Pair a b =
+  | Pair a b
+
+pure proj1 : a × b → a
+def proj1 = λ p.
+  destruct p as
+  | (x, _) → x
+
+pure proj2 : a × b → b
+def proj2 = λ p.
+  destruct p as
+  | (_, y) → y
+
+
 class Eq a where
   | eq : a -> a -> Bool
 
-class Eq a => TestClass a where
-  | bakow : a -> Int
-  | muh : a -> Bool
+-- class Eq a => TestClass a where
+--   | bakow : a -> Int
+--   | muh : a -> Bool
 
-pure f : TestClass a => a -> Int
-def f = bakow
+-- pure f : TestClass a => a -> Int
+-- def f = bakow
 
--- instance TestClass Int where
---   | muh = λx. ⊥
---   | bakow = λx. x
+pure g : Eq a => a -> a -> Bool
+def g = eq
+
+-- pure f : TestClass a => a -> Bool
+-- def f = muh
+
+instance Eq Int where
+  | eq = λx. λy. x = y
+
+instance Eq Bool where
+  | eq = λx. λy.
+      destruct (x, y) as
+      | (⊤, ⊤) → ⊤
+      | (⊥, ⊥) → ⊤
+      | _       → ⊥
+
+run g ⊤
+
+
+# This causes an error in the typechecker.
+pure h : Eq a => a -> a -> Int
+def h = λx. λy. if eq x y then 1 else 0

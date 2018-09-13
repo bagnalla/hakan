@@ -9,7 +9,7 @@
 
 module Ast (
   Command(..), Prog(..), Term(..), Type(..), Unop(..), Binop(..),
-  eraseData, isArithBinop, isComparisonBinop, isBUpdate, binopType,
+  eraseData, isArithBinop, isBooleanBinop, isBUpdate, binopType,
   isValue, typeRec, typeRec2, termRec, termTypeRec, mkArrowType,
   data_of_term, data_of_command, Pattern(..), typeRecM, Kind(..), mkAbs,
   termTypeRecM, commandTypeRec, commandTypeRecM, typeRec2M, mkTyVar,
@@ -17,7 +17,8 @@ module Ast (
   TySubstable(..), TypeSubst, FreeTyVars(..), tysubst', tysubstAll,
   tysubstAll', TypeConstructor(..), propagateClassConstraintsCom, mkTyAbs,
   mkTypeConstructor, mkTypeConstructor', mapTypeConstructor, mkTyApp,
-  termRec2, termSubst
+  termRec2, termSubst, match_type, mkPair, mkProj1, mkProj2,
+  mkTupleProjection, mkApp, compatible, mkTuple, typesRec
   ) where
 
 
@@ -137,7 +138,9 @@ instance Arbitrary Kind where
 -----------------
 -- | Type classes
 
--- TODO: default implementations
+-- TODO: default implementations.
+-- I think the type index can just be an Id for class
+-- definitions.. but for instances it needs to be a Type.
 data TypeClass =
   TypeClass { tyclass_constrs :: [Id] -- superclass constraints
             , tyclass_name :: Id
@@ -165,8 +168,8 @@ data TypeClass =
 -- and their constraints.
 data ClassInstance =
   ClassInstance { -- instance_tyargs :: [Type]
-                  instance_ctx :: [Id]
-                , instance_tyname :: Id
+                  instance_ctx :: [(Id, Id)]
+                -- , instance_tyname :: Id
                 , instance_classname :: Id
                 
                 -- for matching against during instance resolution
@@ -174,11 +177,14 @@ data ClassInstance =
 
                 -- Gives the order in which the dictionary expects its
                 -- dictionary arguments.
-                , instance_args :: [Id]
+                -- , instance_args :: [Id]
 
                 -- Gives the order in which the methods appear in the
                 -- dictionary.
-                , instance_methods :: [Id]
+                
+                -- We should probably just reorder them to match the
+                -- class definition...
+                -- , instance_methods :: [Id]
 
                 -- The dictionary, when fully applied, is an n-tuple
                 -- (iterated pairs starting from unit). It may be
@@ -369,6 +375,40 @@ typeRec2M f t@(TyConstructor (TypeConstructor { tycon_tyargs = tyargs
 typeRec2M f ty = f ty
 
 
+-- A monoid recursion thingy for traversing two types simultaneously
+-- (presumably with the same structure).
+typesRec :: Monoid a => (Type -> Type -> a) -> Type -> Type -> a
+typesRec f s@(TyAbs _ _ s1) t@(TyAbs _ _ t1) = f s t <> typesRec f s1 t1
+typesRec f s@(TyApp s1 s2) t@(TyApp t1 t2) =
+  f s t <> typesRec f s1 t1 <> typesRec f s2 t2
+typesRec f s@(TyArrow s1 s2) t@(TyArrow t1 t2) =
+  f s t <> typesRec f s1 t1 <> typesRec f s2 t2
+typesRec f s@(TyRef s1) t@(TyRef t1) = f s t <> typesRec f s1 t1
+typesRec f s@(TyName _) t@(TyName _) = f s t
+typesRec f s@(TyVariant x tys1 methods1) t@(TyVariant y tys2 methods2)
+  | x == y =
+    f s t <> foldl (<>) mempty (uncurry (typesRec f) <$> zip tys1 tys2)
+    <> foldl (<>) mempty (uncurry (typesRec f) <$>
+                          (zip (concat $ snd <$> methods1)
+                           (concat $ snd <$> methods2)))
+typesRec f s@(TyRecord x tys1 fields1) t@(TyRecord y tys2 fields2)
+  | x == y =
+    f s t <> foldl (<>) mempty (uncurry (typesRec f) <$> zip tys1 tys2)
+    <> foldl (<>) mempty (uncurry (typesRec f) <$>
+                          (zip (snd <$> fields1) (snd <$> fields2)))
+typesRec f s@(TyConstructor (TypeConstructor { tycon_name = nm1
+                                             , tycon_tyargs = tyargs1
+                                             , tycon_ty = ty1 }))
+  t@(TyConstructor (TypeConstructor { tycon_name = nm2
+                                    , tycon_tyargs = tyargs2
+                                    , tycon_ty = ty2 }))
+  | nm1 == nm2 =
+    f s t <>
+    foldl (<>) mempty (uncurry (typesRec f) <$> zip tyargs1 tyargs2) <>
+    f ty1 ty2    
+typesRec f s t = f s t
+
+
 --------------------------------
 -- | Unary and binary operations
 
@@ -437,6 +477,8 @@ data Pattern =
 -- A recursion scheme for terms.
 termRec :: (Term α -> Term α) -> Term α -> Term α
 termRec f (TmAbs fi x ty tm) = f $ TmAbs fi x ty (termRec f tm)
+termRec f (TmApp fi tm1 tm2) =
+  f $ TmApp fi (termRec f tm1) (termRec f tm2)
 termRec f (TmIf fi tm1 tm2 tm3) =
   f $ TmIf fi (termRec f tm1) (termRec f tm2) (termRec f tm3)
 termRec f (TmUnop fi u tm) = f $ TmUnop fi u (termRec f tm)
@@ -454,6 +496,8 @@ termRec f tm = f tm
 
 termRecM :: Monad m => (Term α -> m (Term α)) -> Term α -> m (Term α)
 termRecM f (TmAbs fi x ty tm) = TmAbs fi x ty <$> termRecM f tm >>= f
+termRecM f (TmApp fi tm1 tm2) =
+  pure (TmApp fi) <*> termRecM f tm1 <*> termRecM f tm2 >>= f
 termRecM f (TmIf fi tm1 tm2 tm3) =
   pure (TmIf fi) <*> termRecM f tm1 <*> termRecM f tm2 <*> termRecM f tm3
   >>= f
@@ -492,17 +536,18 @@ termTypeRec :: (Type -> Type) -> Term α -> Term α
 termTypeRec f = termRec $
   \tm -> case tm of
            TmAbs fi x ty tm -> TmAbs fi x (f ty) tm
+           TmPlaceholder fi x y ty -> TmPlaceholder fi x y (f ty)
            _ -> tm
 
 termTypeRecM :: Monad m => (Type -> m Type) -> Term α -> m (Term α)
 termTypeRecM f = termRecM $
   \tm -> case tm of
            TmAbs fi x ty tm -> pure (TmAbs fi x) <*> f ty <*> pure tm
+           TmPlaceholder fi x y ty -> TmPlaceholder fi x y <$> f ty
            _ -> return tm
 
 termSubst :: Eq α => Term α -> Term α -> Term α -> Term α
-termSubst s t = termRec $
-  \tm -> if tm == t then s else tm
+termSubst s t = termRec $ \tm -> if tm == t then s else tm
 
 -------------
 -- | Commands
@@ -518,7 +563,7 @@ data Command α =
   -- constraints, class name, class type variable, method names and types
   | CClass α [Id] Id Id [(Id, Type)]
   -- constraints, class name, instance type, method names and definitions
-  | CInstance α [Id] Id Type [(Id, Term α)]
+  | CInstance α [(Id, Id)] Id Type [(Id, Term α)]
   deriving (Functor, Generic)
 
 
@@ -564,6 +609,10 @@ commandTypeRecM f (CInstance fi constrs nm ty methods) =
 -- about capture here, since there are no naked abstractions outside
 -- of type constructors during unification and we only ever need to
 -- look at the tyargs of type constructors.
+-- NOTE: the pairs are (class name, type variable). I think it's just
+-- like this because that's how things are parsed.. but it seems like
+-- it should be the other way around (not hard to map swap over the
+-- list in the parser).
 propagateClassConstraints :: [(Id, Id)] -> Type -> Type
 propagateClassConstraints =
   flip $ foldl $
@@ -761,10 +810,10 @@ isArithBinop BMult  = True
 isArithBinop BDiv   = True
 isArithBinop _      = False
 
-isComparisonBinop :: Binop -> Bool
-isComparisonBinop BAnd = True
-isComparisonBinop BOr  = True
-isComparisonBinop _    = False
+isBooleanBinop :: Binop -> Bool
+isBooleanBinop BAnd = True
+isBooleanBinop BOr  = True
+isBooleanBinop _    = False
 
 isBUpdate :: Binop -> Bool
 isBUpdate BUpdate = True
@@ -830,6 +879,11 @@ mkAbs :: [Id] -> Term α -> Term α
 mkAbs [] tm = tm
 mkAbs (x:xs) tm =
   TmAbs (data_of_term tm) x (mkTyVar $ Id "") $ mkAbs xs tm
+
+-- Apply a term to a list of arguments.
+mkApp :: Term α -> [Term α] -> Term α
+mkApp s [] = s
+mkApp s (t:ts) = mkApp (TmApp (data_of_term s) s t) ts
 
 -- Make a non-rigid type variable with no class constraints.
 mkTyVar :: Id -> Type
@@ -926,6 +980,7 @@ tysubstAll' :: TySubstable a => TypeSubst -> a -> a
 tysubstAll' tsubst x =
   foldl (\acc (s, t) -> tysubst' s t acc) x tsubst
 
+-- tysubstAllTerm :: 
 
 -------------------------
 -- | Free type variables
@@ -953,3 +1008,89 @@ instance FreeTyVars Type where
                                  { tycon_tyvars = tyvars })) ->
                 modify ((++) $ mkTyVar <$> tyvars) >> return []
               _ -> return [])
+
+
+--
+
+-- x, s, t
+-- match s against t, returning the type in s that corresponds to the
+-- type variable with id x in t.
+match_type :: Id -> Type -> Type -> Maybe Type
+match_type x s t@(TyVar _ _ y) =
+  if x == y then Just s else Nothing
+match_type x (TyArrow s1 t1) (TyArrow s2 t2) =
+  firstJust $ uncurry (match_type x) <$> [(s1, s2), (t1, t2)]
+match_type x (TyRef s) (TyRef t) = match_type x s t
+match_type x (TyVariant nm1 tys1 _) (TyVariant nm2 tys2 _) =
+  if nm1 == nm2 then
+    firstJust $ uncurry (match_type x) <$> zip tys1 tys2
+  else Nothing
+match_type x (TyRecord nm1 tys1 _) (TyRecord nm2 tys2 _) =
+  if nm1 == nm2 then
+    firstJust $ uncurry (match_type x) <$> zip tys1 tys2
+  else Nothing
+match_type x (TyConstructor (TypeConstructor { tycon_name = nm1
+                                             , tycon_tyargs = tyargs1 }))
+             (TyConstructor (TypeConstructor { tycon_name = nm2
+                                             , tycon_tyargs = tyargs2})) =
+  if nm1 == nm2 then
+    firstJust $ uncurry (match_type x) <$> zip tyargs1 tyargs2
+  else Nothing
+-- TODO: probably need to deal with application. x could be standing
+-- in for a type constructor which is applied to something. I suppose
+-- this could only match with a type constructor?
+-- Is this sufficient?
+match_type x s (TyApp (TyVar _ _ y) _) = if x == y then Just s else Nothing
+match_type _ _ _ = Nothing
+
+
+compatible :: Type -> Type -> Bool
+compatible (TyVar _ _ _) (TyVar _ _ _) = True
+compatible (TyAbs _ k1 s) (TyAbs _ k2 t) = k1 == k2 && compatible s t
+compatible TyUnit TyUnit = True
+compatible TyBool TyBool = True
+compatible TyInt TyInt = True
+compatible TyChar TyChar = True
+compatible (TyArrow s1 t1) (TyArrow s2 t2) =
+  compatible s1 s2 && compatible t1 t2
+compatible (TyRef s) (TyRef t) = compatible s t
+compatible (TyName x) (TyName y) = x == y
+compatible (TyVariant nm1 tys1 _) (TyVariant nm2 tys2 _) =
+  nm1 == nm2 && (and $ uncurry compatible <$> zip tys1 tys2)
+compatible (TyRecord nm1 tys1 _) (TyRecord nm2 tys2 _) =
+  nm1 == nm2 && (and $ uncurry compatible <$> zip tys1 tys2)
+compatible
+  (TyConstructor (TypeConstructor { tycon_name = nm1
+                                  , tycon_tyargs = tyargs1 }))
+  (TyConstructor (TypeConstructor { tycon_name = nm2
+                                  , tycon_tyargs = tyargs2 })) =
+  nm1 == nm2 && length tyargs1 == length tyargs2 &&
+  (and $ uncurry compatible <$> zip tyargs1 tyargs2)
+compatible _ _ = False
+
+-------------------------------------------
+-- | Helpers for building common AST terms.
+
+mkPair :: α -> Term α -> Term α -> Term α
+mkPair fi tm1 tm2 = TmApp fi (TmApp fi (TmVar fi (Id "Pair")) tm1) tm2
+
+mkProj1 :: α -> Term α -> Term α
+mkProj1 fi tm = TmApp fi (TmVar fi (Id "proj1")) tm
+
+mkProj2 :: α -> Term α -> Term α
+mkProj2 fi tm = TmApp fi (TmVar fi (Id "proj2")) tm
+
+mkTuple :: [Term α] -> Term α
+mkTuple [] = error "mkTuple: empty list"
+mkTuple (x:[]) = x
+mkTuple (x:xs) = mkPair (data_of_term x) x $ mkTuple xs
+
+mkTupleProjection :: Int -> Int -> Term α -> Term α
+mkTupleProjection n m _
+  | n < 0 = error $ "invalid index: " ++ show n
+  | m < 1 = error $ "invalid length: " ++ show m
+mkTupleProjection 0 1 tm = tm
+mkTupleProjection 0 _ tm = mkProj1 (data_of_term tm) tm
+mkTupleProjection 1 2 tm = mkProj2 (data_of_term tm) tm
+mkTupleProjection n m tm =
+  mkTupleProjection (n-1) (m-1) $ mkProj2 (data_of_term tm) tm

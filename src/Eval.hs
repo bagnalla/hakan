@@ -71,10 +71,11 @@ freshLoc = do
 
 evalError :: (MonadReader Env m, MonadState (b, Env) m) => String -> m a
 evalError s = do
-  env <- ask
-  (_, heap) <- get
-  error $ "runtime error!\nenvironment:\n" ++ show env ++ "\n\nheap: "
-    ++ show heap ++ "\n\n" ++ s
+  -- env <- ask
+  -- (_, heap) <- get
+  -- error $ "runtime error!\nenvironment:\n" ++ show env ++ "\n\nheap: "
+  --   ++ show heap ++ "\n\n" ++ s
+  error $ "runtime error!\n" ++ s
 
 
 ------------------------
@@ -102,7 +103,10 @@ eval (TmApp _ t1 t2) = do
       -- debugPrint ("v1: " ++ show v1) $
       -- Force call-by-value order with seq
       seq v2 $ local (const $ extendEnv nm v2 clos) $ eval body
-    _ -> evalError $ "eval: " ++ show v1 ++ " isn't a closure"
+    _ ->
+      debugPrint (show t1) $
+      debugPrint (show t2) $
+      evalError $ "eval: " ++ show v1 ++ " isn't a closure"
 
 eval (TmUnit _) = return VUnit
 eval (TmBool _ b) = return $ VBool b
