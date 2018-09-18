@@ -104,8 +104,10 @@ eval (TmApp _ t1 t2) = do
       -- Force call-by-value order with seq
       seq v2 $ local (const $ extendEnv nm v2 clos) $ eval body
     _ ->
-      debugPrint (show t1) $
-      debugPrint (show t2) $
+      debugPrint ("tm1: " ++ show t1) $
+      debugPrint ("v1: " ++ show v1) $
+      debugPrint ("tm2: " ++ show t2) $
+      debugPrint ("v2: " ++ show v2) $
       evalError $ "eval: " ++ show v1 ++ " isn't a closure"
 
 eval (TmUnit _) = return VUnit
@@ -204,7 +206,10 @@ eval (TmMatch _ discrim cases) =
         Just e -> local (const e) $ eval tm
         -- If the pattern fails to match, try the next one.
         Nothing -> go cs v
-    go [] _ = evalError "eval: failed to match any pattern"
+    go [] _ =
+      debugPrint ("discrim: " ++ show discrim) $
+      debugPrint ("cases: " ++ show cases) $
+      evalError "eval: failed to match any pattern"
 
 eval tm@(TmPlaceholder _ _ _ _) =
   error $ "eval: unexpected placeholder: " ++ show tm

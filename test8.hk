@@ -29,18 +29,18 @@ def proj2 = λ p.
 class Eq a where
   | eq : a -> a -> Bool
 
--- class Eq a => TestClass a where
---   | bakow : a -> Int
---   | muh : a -> Bool
+class Eq a => TestClass a where
+  | foo : a -> Bool
+  | bar : a -> Int
 
 -- pure f : TestClass a => a -> Int
--- def f = bakow
+-- def f = bar
 
 pure g : Eq a => a -> a -> Bool
 def g = eq
 
 -- pure f : TestClass a => a -> Bool
--- def f = muh
+-- def f = foo
 
 instance Eq Int where
   | eq = λx. λy. x = y
@@ -52,9 +52,46 @@ instance Eq Bool where
       | (⊥, ⊥) → ⊤
       | _       → ⊥
 
-run g ⊤
+run g ⊤ ⊥
 
 
-# This causes an error in the typechecker.
-pure h : Eq a => a -> a -> Int
-def h = λx. λy. if eq x y then 1 else 0
+-- pure h : Eq a => a -> a -> Int
+-- def h = λx. λy. if eq x y then 1 else 0
+
+-- run (h 456457 45645, (h ⊥ ⊤, h ⊤ ⊤))
+
+
+instance TestClass Int where
+  | bar = λx. x
+  | foo = λx. if eq x 0 then ⊥ else ⊤
+
+instance TestClass Bool where
+  | foo = λx. ¬ x
+  | bar = λx. if x then 123 else 66
+
+-- pure k : TestClass a => a -> Int
+-- def k = bar
+
+-- pure asdf : Int
+-- def asdf = k 0
+
+-- run asdf
+
+-- pure k2 : TestClass a => a -> Bool
+-- def k2 = foo
+
+-- run bar 0
+
+-- pure asdf2 : Bool
+-- def asdf2 = k2 1
+
+-- run asdf2
+
+-- run (muh 0, asdf2)
+
+
+pure f1 : TestClass a => a -> Int × Bool
+def f1 = λx. (bar x, foo x)
+
+run f1 ⊥
+

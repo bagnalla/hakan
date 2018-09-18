@@ -38,15 +38,22 @@ unify fi η ψ ((s', t') : xs) =
   let s = unfold fi η s'
       t = unfold fi η t'
   in
+  debugPrint ("s: " ++ show s) $
+  debugPrint ("t: " ++ show t) $
+  debugPrint ("xs: " ++ show xs) $
   -- debugPrint "unify" $
   -- Ensure equal type variables have the same class constraints since
   -- the Eq instance for types only checks their Ids. Not sure that
   -- this is actually necessary.
-  if isTyVar s && isTyVar t && s == t then
-    if ctxOfType s `isPermutationOf` ctxOfType t then
-      unify fi η ψ xs
-    else
-      Left (s, t, "Class constraints don't match")
+  if isTyVar s && isTyVar t && s == t then do
+    -- if ctxOfType s `isPermutationOf` ctxOfType t then
+    --   unify fi η ψ xs
+    -- else
+    --   Left (s, t, "Class constraints don't match")
+    let (TyVar b ctx x) = t
+    let t' = TyVar b (ctx `union` ctxOfType s) x
+    rest <- unify fi η ψ $ tysubst' t' s xs
+    return $ (t', s) : rest
   else if s == t then
     unify fi η ψ xs
   else if isTyVar s && (not $ isRigid s) &&
@@ -54,9 +61,9 @@ unify fi η ψ ((s', t') : xs) =
     do
       case t of
         TyVar b ctx x -> do
-          rest <- unify fi η ψ $
-            tysubst' (TyVar b (ctx `union` ctxOfType s) x) s xs
-          return $ (t, s) : rest
+          let t' = TyVar b (ctx `union` ctxOfType s) x
+          rest <- unify fi η ψ $ tysubst' t' s xs
+          return $ (t', s) : rest
         _ -> do
           let ctx = ctxOfType s -- list of Class name Ids
           -- Do context reduction for each class. The type we are
@@ -80,7 +87,7 @@ unify fi η ψ ((s', t') : xs) =
               let xs' = bimap (propagateClassConstraints constrs)
                         (propagateClassConstraints constrs) <$> xs
               rest <- unify fi η ψ $ tysubst' t' s xs'
-              return $ (t, s) : rest
+              return $ (t', s) : rest
 
   -- Just handle the above case and then in this one do a recursive
   -- call with s and t swapped.
@@ -109,6 +116,7 @@ unify fi η ψ ((s', t') : xs) =
       unify fi η ψ $ zip s' t' ++ xs
   else
     -- Failed to unify s and t
+    -- debugPrint ("xs: " ++ show xs) $
     Left (s, t, "Incompatible types")
 
 

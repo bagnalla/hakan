@@ -31,8 +31,11 @@ main = do
   -- Replace imports by inlining their source code
   let src' = substImports src import_srcs
 
-  -- let ast = parseAndTycheck src'
-  -- putStrLn $ "\n" ++ show ast
+  -- let ast = parseOnly src'
+  -- putStrLn $ "\nParsed:\n" ++ show ast
+
+  let ast' = parseAndTycheck src'
+  putStrLn $ "\nTypechecked:\n" ++ show ast'
 
   -- let tyx = TyVar False (Id "x")
   -- let tyy = TyVar False (Id "y")

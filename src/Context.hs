@@ -1,16 +1,18 @@
 {-# LANGUAGE FlexibleContexts #-}
 
 module Context (
-  Context(..), TypeScheme, unfold, instantiate_tyscheme, generalize_ty,
+  Context(..), TypeScheme, unfold, instantiate_tyscheme,
   mkTypeScheme, initCtx, updDecls, updGamma, open_tyscheme, updClasses,
-  typeOfTypeScheme, instantiate_tyscheme', mkTypeScheme', generalize_ty',
-  isMethod, updInstances, classConstraints, normalize_ty, ctxOfTypeScheme
+  typeOfTypeScheme, instantiate_tyscheme', mkTypeScheme',
+  isMethod, updInstances, classConstraints, normalize_ty, varsOfTypeScheme,
+  superclasses, all_class_constraints, constrsOfTypeScheme
   ) where
 
 import Control.Monad.Reader
 import Control.Monad.State
-import Data.List (intercalate)
+import Data.List (groupBy, intercalate, nub)
 -- import Data.Maybe (fromJust)
+import Data.Tuple (swap)
 
 import Ast
 import Core
@@ -47,7 +49,7 @@ data Context =
 -- map types to instances. types including arrow types and everything,
 -- including abstractions. When we search for types in the instance
 -- database, instead of checking for equality we hold their type
--- variables rigid and try to unify with the type we're searching
+-- variables rigidand try to unify with the type we're searching
 -- for. Then we will know the class constraints .. ?
 
 -- Or maybe we just use a slightly different notion of equality -- up
@@ -111,8 +113,11 @@ data TypeScheme =
 typeOfTypeScheme :: TypeScheme -> Type
 typeOfTypeScheme = tyscheme_ty
 
-ctxOfTypeScheme :: TypeScheme -> [(Id, [Id])]
-ctxOfTypeScheme = tyscheme_vars
+varsOfTypeScheme :: TypeScheme -> [(Id, [Id])]
+varsOfTypeScheme = tyscheme_vars
+
+constrsOfTypeScheme :: TypeScheme -> [(Id, Id)]
+constrsOfTypeScheme = map swap . flattenSnd . tyscheme_vars
 
 isMethod :: TypeScheme -> Bool
 isMethod (TypeScheme { tyscheme_ismethod = b }) = b
@@ -129,18 +134,41 @@ instance Show TypeScheme where
     "(TypeScheme " ++ show ty ++ " (" ++
     intercalate ", " (show <$> vars) ++ "))"
 
-generalize_ty :: Bool -> Type -> TypeScheme
-generalize_ty ismethod ty =
-  -- mkTypeScheme (map (\tyvar ->
-  --                      case tyvar of
-  --                        TyVar _ ctx nm -> (nm, ctx)
-  --                        _ -> error "generalize_ty: expected TyVar") $
-  --                freetyvars ty) ty ismethod
-  mkTypeScheme (classConstraints $ freetyvars ty) ty ismethod
-  
-generalize_ty' :: Type -> TypeScheme
-generalize_ty' = generalize_ty False
 
+-- Recursively get all superclasses
+superclasses :: Symtab TypeClass -> Id -> [Id]
+superclasses ϕ classNm = do
+  case Symtab.get classNm ϕ of
+    Just (TypeClass { tyclass_constrs = constrs
+                    , tyclass_index = tyIndex }) ->
+      -- pure (++) <*> concat <$> (sequence $ superclasses <$> constrs) <*>
+      -- pure constrs
+      concat (superclasses ϕ <$> constrs) ++ constrs
+    Nothing ->
+      error $ "superclasses: class " ++ show classNm ++
+      " not found. Known classes:\n" ++ show ϕ
+
+-- TODO: Should we include superclass constraints as well? It would
+-- probably make sense so then the list of constraints is the
+-- definitive list.. but we would need to take the typing context as
+-- an argument here (or at least the symtab of known classes).
+-- generalize_ty :: [(Id, [Id])] -> Bool -> Type -> TypeScheme
+-- generalize_ty constrs ismethod ty = mkTypeScheme constrs ismethod ty
+
+-- generalize_ty' :: [(Id, Id)] -> Bool -> Type -> TypeScheme
+-- generalize_ty' constrs =
+--   let constrs' = (\l -> (fst (head l), snd <$> l)) <$>
+--                  groupBy (\x y -> fst x == fst y) constrs in
+--     generalize_ty constrs'
+
+-- generalize_ty' :: [(Id, [Id])] -> Type -> TypeScheme
+-- generalize_ty' = flip generalize_ty False
+
+all_class_constraints :: Symtab TypeClass -> Type -> [(Id, [Id])]
+all_class_constraints ϕ =
+  -- map (mapSnd $ nub . concat . map
+  --      (\constr -> superclasses ϕ constr ++ [constr])) .
+  classConstraints . freetyvars
 
 -- Get all of the class constraints of a list of types. Not sure if
 -- it's necessary to do it this way.. since there shouldn't be any
@@ -155,26 +183,35 @@ classConstraints = flip foldl [] $
         Nothing -> assocSet nm ctx acc
     _ -> acc
 
+classConstraints' :: [Type] -> [(Id, Id)]
+classConstraints' = flattenSnd . classConstraints
 
 -- Build a type scheme from a list of type variables and a body type,
 -- where the variables may appear free in the body. Each variable is
 -- described by a name and a list of class constraints.
-mkTypeScheme :: [(Id, [Id])] -> Type -> Bool -> TypeScheme
-mkTypeScheme vars ty ismethod =
+mkTypeScheme :: [(Id, [Id])] -> Bool -> Type -> TypeScheme
+mkTypeScheme vars ismethod ty =
   let x = TypeScheme { tyscheme_ty = mkTyAbs (fst <$> vars) ty
                      , tyscheme_vars = vars
                      , tyscheme_ismethod = ismethod } in
-    debugPrint "\n\nmkTypeScheme" $
-    debugPrint ("vars: " ++ show vars) $
-    debugPrint ("ty: " ++ show ty) $
-    debugPrint ("tyscheme: " ++ show x) x
+    x
+    -- debugPrint "\n\nmkTypeScheme" $
+    -- debugPrint ("vars: " ++ show vars) $
+    -- debugPrint ("ty: " ++ show ty) $
+    -- debugPrint ("tyscheme: " ++ show x) x
+
+mkTypeScheme' :: [(Id, Id)] -> Bool -> Type -> TypeScheme
+mkTypeScheme' constrs =
+  let constrs' = (\l -> (fst (head l), snd <$> l)) <$>
+                 groupBy (\x y -> fst x == fst y) constrs in
+    mkTypeScheme constrs'
+
 
 -- mkTypeScheme' :: [(Id, [Id])] -> Type -> TypeScheme
 -- mkTypeScheme' vars ty = mkTypeScheme vars ty False
 
-mkTypeScheme' :: Type -> TypeScheme
-mkTypeScheme' ty =
-  mkTypeScheme (classConstraints $ freetyvars ty) ty False
+-- mkTypeScheme' :: [(Id, [Id])] -> Type -> TypeScheme
+-- mkTypeScheme' constrs ty = mkTypeScheme constrs ty False
 
 -- -- Build a type scheme from a list of Ids and a type, where the Ids
 -- -- may appear free as type variables in the body.
@@ -206,13 +243,15 @@ instantiate_tyscheme :: (Show α, Num s, Show s, MonadState s m) =>
                         α -> Bool -> TypeScheme -> m Type
 instantiate_tyscheme fi b (TypeScheme { tyscheme_ty = ty
                                       , tyscheme_vars = vars }) = do
-  -- debugPrint ("\n\n\ninstantiate_tyscheme") $
-  -- debugPrint ("ty: " ++ show ty) $
-  -- debugPrint ("vars: " ++ show vars) $ do
-  x <- foldM (\acc (nm, ctx) ->
-                 TyApp acc <$> TyVar b ctx . Id <$> nextSym "?Y_")
-       ty vars
-  debugPrint ("x: " ++ show x) $ return x
+  debugPrint ("\ninstantiate_tyscheme") $
+    debugPrint ("ty: " ++ show ty) $
+    debugPrint ("vars: " ++ show vars) $ do
+    x <- foldM (\acc (nm, ctx) ->
+                  TyApp acc <$> TyVar b ctx . Id <$> nextSym "?Y_")
+         ty vars
+    debugPrint ("x: " ++ show x) $
+      debugPrint ("x normalized: " ++ show (normalize_ty x)) $
+      return x
 
 instantiate_tyscheme' :: (Show α, Num s, Show s, MonadState s m) =>
                          α -> TypeScheme -> m Type
@@ -281,7 +320,7 @@ unfold fi η (TyApp ty s) =
         error $ "unfold: type constructor " ++ show tycon ++
         " is already fully applied"
       else
-        debugPrint ("\nAPPLYING " ++ show tycon ++ " to " ++ show s) $
+        -- debugPrint ("\nAPPLYING " ++ show tycon ++ " to " ++ show s) $
         let x = tyvars !! length tyargs in
           TyConstructor $
           tycon { tycon_kinds = kinds ++ [KStar]

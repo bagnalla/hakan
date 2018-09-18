@@ -17,8 +17,8 @@ module Ast (
   TySubstable(..), TypeSubst, FreeTyVars(..), tysubst', tysubstAll,
   tysubstAll', TypeConstructor(..), propagateClassConstraintsCom, mkTyAbs,
   mkTypeConstructor, mkTypeConstructor', mapTypeConstructor, mkTyApp,
-  termRec2, termSubst, match_type, mkPair, mkProj1, mkProj2,
-  mkTupleProjection, mkApp, compatible, mkTuple, typesRec
+  termRec2, termSubst, match_type, mkPair, mkProj1, mkProj2, mkAppTree,
+  mkTupleProjection, mkApp, compatible, mkTuple, typesRec, isTmVar
   ) where
 
 
@@ -107,6 +107,7 @@ import Control.Monad.State
 import Data.Bifunctor
 import Data.List (intercalate, nub)
 import Data.Monoid
+import Data.Tree
 import GHC.Generics (Generic)
 import Generic.Random.Generic
 
@@ -764,6 +765,33 @@ instance Show (Term α) where
   show (TmPlaceholder _ classNm methodNm ty) =
     "(TmPlaceholder " ++ show classNm ++ " " ++ show methodNm ++ " "
     ++ show ty ++ ")"
+
+-- instance Show α => Show (Term α) where
+--   show (TmVar fi x)         = "(TmVar " ++ show fi ++ " " ++ show x ++ ")"
+--   show (TmAbs fi x ty t)    = "(TmAbs " ++ show fi ++ " " ++ show x ++ " " ++ show ty ++
+--                               " " ++ show t ++ ")"
+--   show (TmApp fi t1 t2)     = "(TmApp " ++ show fi ++ " " ++ show t1 ++ " " ++ show t2 ++ ")"
+--   show (TmBool fi b)        = "(TmBool " ++ show fi ++ " " ++ show b ++ ")"
+--   show (TmIf fi t1 t2 t3)   = "(TmIf " ++ show fi ++ " " ++ show t1 ++ " " ++ show t2 ++
+--                              " " ++ show t3 ++ ")"
+--   show (TmInt fi i)         = "(TmInt " ++ show fi ++ " " ++ show i ++ ")"
+--   show (TmChar fi c)        = "(TmChar " ++ show fi ++ " " ++ show c ++ ")"
+--   show (TmBinop fi b t1 t2) = "(TmBinop " ++ show fi ++ " " ++ show b ++ " " ++ show t1 ++
+--                              " " ++ show t2 ++ ")"
+--   show (TmUnop fi u t)   = "(TmUnop " ++ show fi ++ " " ++ show u ++ " " ++ show t ++ ")"
+--   show (TmUnit fi)       = "(TmUnit " ++ show fi ++ ")"
+--   show (TmLet fi x tm1 tm2) =
+--     "(TmLet " ++ show fi ++ " " ++ show x ++ " " ++ show tm1 ++ " " ++ show tm2 ++ ")"
+--   show (TmVariant fi x tms) =
+--     "(TmVariant " ++ show fi ++ " " ++ show x ++ " " ++ show tms ++ ")"
+--   show (TmMatch fi discrim cases) =
+--     "(TmMatch " ++ show fi ++ " " ++ show discrim ++ " " ++
+--     (intercalate " " (map show cases)) ++ ")"
+--   show (TmRecord fi fields) =
+--     "(TmRecord " ++ show fi ++ " " ++ show fields ++ ")"
+--   show (TmPlaceholder fi classNm methodNm ty) =
+--     "(TmPlaceholder " ++ show fi ++ " " ++ show classNm ++ " " ++ show methodNm ++ " "
+--     ++ show ty ++ ")"
         
 instance Show α => Show (Command α) where
   show (CDecl _ s t) = "(CDecl " ++ show s ++ " " ++ show t ++ ")"
@@ -884,6 +912,10 @@ mkAbs (x:xs) tm =
 mkApp :: Term α -> [Term α] -> Term α
 mkApp s [] = s
 mkApp s (t:ts) = mkApp (TmApp (data_of_term s) s t) ts
+
+--
+mkAppTree :: Tree (Term α) -> Term α
+mkAppTree (Node tm1 tms) = mkApp tm1 $ mkAppTree <$> tms
 
 -- Make a non-rigid type variable with no class constraints.
 mkTyVar :: Id -> Type
@@ -1094,3 +1126,7 @@ mkTupleProjection 0 _ tm = mkProj1 (data_of_term tm) tm
 mkTupleProjection 1 2 tm = mkProj2 (data_of_term tm) tm
 mkTupleProjection n m tm =
   mkTupleProjection (n-1) (m-1) $ mkProj2 (data_of_term tm) tm
+
+isTmVar :: Term α -> Bool
+isTmVar (TmVar _ _) = True
+isTmVar _ = False

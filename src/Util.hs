@@ -15,6 +15,12 @@ debugPrint = trace
 tupleFun :: (a -> b) -> (a -> c) -> a -> (b, c)
 tupleFun f g x = (f x, g x)
 
+app2 :: (c -> d -> e) -> (a -> c) -> (b -> d) -> a -> b -> e
+app2 h f g = (. g) . (h . f)
+
+pairFun :: (a -> c) -> (b -> d) -> (a, b) -> (c, d)
+pairFun = (. (. snd)) . (tupleFun . (. fst))
+
 mapFst :: (a -> c) -> (a, b) -> (c, b)
 mapFst = flip bimap id
 
@@ -41,7 +47,8 @@ allEq [] = True
 allEq (x:xs) = all (== x) xs
 
 isPermutationOf :: Eq a => [a] -> [a] -> Bool
-isPermutationOf xs ys = length xs == length ys && all (`elem` ys) xs
+isPermutationOf xs ys =
+  length xs == length ys && all (`elem` ys) xs && all (`elem` xs) ys
 
 firstJust :: [Maybe a] -> Maybe a
 firstJust = listToMaybe . catMaybes
