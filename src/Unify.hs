@@ -95,7 +95,7 @@ unify fi η ψ ((s', t') : xs) =
           (not $ t `elem` freetyvars s) then
     unify fi η ψ $ (t, s) : xs
 
-  else if isBiType s && isBiType t then
+  else if isArrowType s && isArrowType t then
     let (s1, s2) = pairOfType s
         (t1, t2) = pairOfType t in
       unify fi η ψ $ (s1, t1) : (s2, t2) : xs
@@ -114,6 +114,11 @@ unify fi η ψ ((s', t') : xs) =
     let s' = tyargsOfTy s
         t' = tyargsOfTy t in
       unify fi η ψ $ zip s' t' ++ xs
+  else if isTyApp s && isTyApp t then
+    case (s, t) of
+      (TyApp s1@(TyVar _ _ x) s2, TyApp t1@(TyVar _ _ y) t2) ->
+        unify fi η ψ $ [(s1, t1), (s2, t2)] ++ xs
+      _ -> Left (s, t, "Incompatible types")
   else
     -- Failed to unify s and t
     -- debugPrint ("xs: " ++ show xs) $

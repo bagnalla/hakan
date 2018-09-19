@@ -1202,12 +1202,12 @@ process_term tsubst tm =
   let var_constrs2 = get_typescheme_constraints ctx filled
   let spec = specialize_term ctx filled
   let all_constrs = var_constrs1 ++ var_constrs2
-  -- TODO: need to propagate these constraints through spec before
-  -- passing to generalize_term.
+  -- TODO: propagate these constraints? through spec before passing to
+  -- generalize_term.
   let (gen, tyscheme) = generalize_term ctx all_constrs spec
-  debugPrint ("TODO: need to propagate " ++ show all_constrs ++
-              " in type " ++ show (ty_of_term spec)) $
-    debugPrint ("constrs1: " ++ show constrs1) $
+  -- debugPrint ("TODO: need to propagate " ++ show all_constrs ++
+  --             " in type " ++ show (ty_of_term spec)) $
+  debugPrint ("constrs1: " ++ show constrs1) $
     debugPrint ("var_constrs1: " ++ show var_constrs1) $
     debugPrint ("var_constrs2: " ++ show var_constrs2) $
     debugPrint ("filled: " ++ show filled) $

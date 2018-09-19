@@ -1,0 +1,39 @@
+
+data Pair a b =
+  | Pair a b
+
+pure proj1 : a × b → a
+def proj1 = λ p.
+  destruct p as
+  | (x, _) → x
+
+pure proj2 : a × b → b
+def proj2 = λ p.
+  destruct p as
+  | (_, y) → y
+
+# Thinking of changing the destruct syntax to this. Change 'destruct' to
+# 'case' just because it's shorter, and get rid of other keyword entirely.
+-- def proj2 = λ p.
+--   case p
+--   | (_, y) → y
+
+# This should also be allowed (similar to 'function' in OCaml).
+-- def proj2 = case
+--   | (_, y) → y
+
+# As well as this when you only want to match one case. For now we don't
+# support multiple equations for a single function though (like Haskell
+# does) for multiple cases we use the syntax shown above.
+-- def proj2 (_, y) = y
+
+# Here we can get rid of the 'where' keyword.
+class Functor f where
+  | fmap : (a → b) → f a → f b
+
+instance Functor (Pair a) where
+  | fmap = λf. λp. (p₁, f (p₂))
+
+def p = (0, ⊤)
+
+run fmap (λx. x + 1) p

@@ -5,8 +5,8 @@
 
 module Core (
   genTypeVars, idOfType, isTyVar, fixTy, kindCheck, ctxOfType, isRigid,
-  isBiType, pairOfType, isTyRef, tyOfRefType, isVariantTy, isRecordTy,
-  tyargsOfTy, isTyConstructor
+  isArrowType, pairOfType, isTyRef, tyOfRefType, isVariantTy, isRecordTy,
+  tyargsOfTy, isTyConstructor, isTyApp
   ) where
 
 import Control.Monad.State
@@ -119,9 +119,9 @@ isTyVar :: Type -> Bool
 isTyVar (TyVar _ _ _) = True
 isTyVar _         = False
 
-isBiType :: Type -> Bool
-isBiType (TyArrow _ _) = True
-isBiType _ = False
+isArrowType :: Type -> Bool
+isArrowType (TyArrow _ _) = True
+isArrowType _ = False
 
 isTyRef :: Type -> Bool
 isTyRef (TyRef _) = True
@@ -138,6 +138,10 @@ isRecordTy _ = False
 isTyConstructor :: Type -> Bool
 isTyConstructor (TyConstructor _) = True
 isTyConstructor _ = False
+
+isTyApp :: Type -> Bool
+isTyApp (TyApp _ _) = True
+isTyApp _ = False
 
 isRigid :: Type -> Bool
 isRigid (TyVar True _ _) = True
