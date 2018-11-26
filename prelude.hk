@@ -28,9 +28,16 @@ def double = λx. (x, x)
 pure seq : a → Unit
 def seq = λ_. tt
 
+# The identity function
+pure id : a → a
+def id = λx. x
+
 # Function composition.
 pure compose : (a → b) → (b → c) → a → c
 def compose = λf. λg. λx. g (f x)
+
+pure flip : (a → b → c) → b → a → c
+def flip = λf. λx. λy. f y x
 
 # Function tupling.
 pure tuple : (a → b) → (a → c) → a → b × c

@@ -1,0 +1,66 @@
+∃ base
+
+# The identity function
+pure id : a → a
+def id = λx. x
+
+# Function composition.
+pure compose : (a → b) → (b → c) → a → c
+def compose = λf. λg. λx. g (f x)
+
+pure flip : (a → b → c) → b → a → c
+def flip = λf. λx. λy. f y x
+
+class Functor f where
+  | fmap : (a → b) → f a → f b
+
+data StateT s m a =
+  | StateT (s → m (s × a))
+
+pure bimap : (a → c) → (b → d) → a × b → c × d
+def bimap = λf. λg. λp.
+  destruct p as
+  | (x, y) → (f x, g y)
+
+pure second : (b → c) → a × b → a × c
+def second = bimap id
+
+instance Functor m => Functor (StateT s m) where
+  | fmap =
+    λf. λa.
+    destruct a as
+    | StateT g → StateT (λs. fmap (second f) (g s))
+
+data Identity a =
+  | Identity a
+
+pure runIdentity : Identity a → a
+def runIdentity = λx. destruct x as
+  | Identity y → y
+
+instance Functor Identity where
+  | fmap = λf. λx. destruct x as
+      | Identity y -> Identity (f y)
+
+pure runStateT : StateT s m a → s → m (s × a)
+def runStateT = λm. λs. destruct m as
+  | StateT f → f s
+
+pure runState : StateT s Identity a → s → (s × a)
+def runState = (flip compose runIdentity) ∘ runStateT
+
+# Our computation just ignores the state and returns 0.
+pure computation : StateT Int Identity Int
+def computation = StateT (λx. Identity (x, 0))
+
+# First fmap an increment function over the computation and then run it,
+# resulting in the value 1.
+run π₂ (runState (fmap (λx. x + 1) computation) 0)
+# ==> 1
+
+
+
+pure computation : StateT Int Identity Int
+def computation = StateT (λx. Identity (x, 0))
+run π₂ (runState (fmap (λx. x + 1) computation) 0)
+# ==> 1

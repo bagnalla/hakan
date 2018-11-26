@@ -111,7 +111,7 @@ idOfType (TyConstructor (TypeConstructor { tycon_name = nm })) = nm
 idOfType _ =
   error "idOfType: expected variable, variant, record, or type constructor"
 
-ctxOfType :: Type -> [Id]
+ctxOfType :: Type -> [ClassNm]
 ctxOfType (TyVar _ ctx _) = ctx
 ctxOfType _ = error "ctxOfType: expected type variable"
 

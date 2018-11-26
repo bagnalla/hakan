@@ -18,7 +18,9 @@ module Ast (
   tysubstAll', TypeConstructor(..), propagateClassConstraintsCom, mkTyAbs,
   mkTypeConstructor, mkTypeConstructor', mapTypeConstructor, mkTyApp,
   termRec2, termSubst, match_type, mkPair, mkProj1, mkProj2, mkAppTree,
-  mkTupleProjection, mkApp, compatible, mkTuple, typesRec, isTmVar
+  mkTupleProjection, mkApp, compatible, mkTuple, typesRec, isTmVar,
+  showTypeLight, chopTypeConstructor, applyTypeConstructor,
+  etaReduceTypeConstructor, ClassNm(..)
   ) where
 
 
@@ -139,12 +141,24 @@ instance Arbitrary Kind where
 -----------------
 -- | Type classes
 
+-- Newtype for class names for extra type safety. They are often
+-- passed around with type variable names in constraint pairs and it's
+-- easy to get them mixed up when they are both Ids.
+newtype ClassNm = ClassNm { unClassNm :: Id }
+  deriving (Eq)
+
+instance Show ClassNm where
+  show (ClassNm x) = show x
+
+instance Arbitrary ClassNm where
+  arbitrary = ClassNm <$> arbitrary
+
 -- TODO: default implementations.
 -- I think the type index can just be an Id for class
 -- definitions.. but for instances it needs to be a Type.
 data TypeClass =
-  TypeClass { tyclass_constrs :: [Id] -- superclass constraints
-            , tyclass_name :: Id
+  TypeClass { tyclass_constrs :: [ClassNm] -- superclass constraints
+            , tyclass_name :: ClassNm
             , tyclass_index :: Id
             , tyclass_methods :: [(Id, Type)]}
   deriving Show
@@ -169,9 +183,9 @@ data TypeClass =
 -- and their constraints.
 data ClassInstance =
   ClassInstance { -- instance_tyargs :: [Type]
-                  instance_ctx :: [(Id, Id)]
+                  instance_ctx :: [(Id, ClassNm)]
                 -- , instance_tyname :: Id
-                , instance_classname :: Id
+                , instance_classname :: ClassNm
                 
                 -- for matching against during instance resolution
                 , instance_ty :: Type
@@ -210,7 +224,7 @@ data ClassInstance =
 -- abstractions..
 
 data Type =
-  TyVar Bool [Id] Id
+  TyVar Bool [ClassNm] Id
   | TyAbs Id Kind Type
   | TyApp Type Type
   | TyUnit
@@ -261,6 +275,14 @@ mkTypeConstructor' :: Id -> [Id] -> [Kind] -> Type -> Type
 mkTypeConstructor' nm tyvars kinds ty =
   mkTypeConstructor nm tyvars kinds [] ty
 
+-- -- Wrap a type in a type constructor if it's an abstraction or
+-- -- application. Otherwise leave it unchanged.
+-- mkTypeConstructorSmart :: Type -> Type
+-- mkTypeConstructorSmart (TyAbs x k ty) = undefined
+--   -- mkTypeConstructor' x 
+-- mkTypeConstructorSmart (TyApp s t) = undefined
+-- mkTypeConstructorSmart ty = ty
+
 
 mapTypeConstructor :: (Type -> Type) -> TypeConstructor -> TypeConstructor
 mapTypeConstructor f tycon@(TypeConstructor
@@ -270,6 +292,57 @@ mapTypeConstructor f tycon@(TypeConstructor
   tycon { tycon_tyargs = f <$> tyargs
         , tycon_ty = f uninst
         , tycon_instantiated = f inst }
+
+-- Given a type constructor applied to at least one argument, strip
+-- off the last argument.
+chopTypeConstructor :: Type -> Type
+chopTypeConstructor (TyConstructor (TypeConstructor { tycon_name = nm
+                                                    , tycon_tyvars = tyvars
+                                                    , tycon_kinds = kinds
+                                                    , tycon_tyargs = tyargs
+                                                    , tycon_ty = ty })) =
+  mkTypeConstructor nm tyvars kinds (removeLast tyargs) (unTyAbs ty)
+chopTypeConstructor _ = error "chopTypeConstructor: expected TyConstructor"
+
+applyTypeConstructor :: Type -> Type -> Type
+applyTypeConstructor
+  (TyConstructor
+    tycon@(TypeConstructor { tycon_tyvars = tyvars
+                           , tycon_tyargs = tyargs
+                           , tycon_instantiated = s }))
+  t =
+  if length tyargs + 1 <= length tyvars then
+    TyConstructor $ tycon { tycon_tyargs = tyargs ++ [t]
+                          , tycon_instantiated = TyApp s t }
+  else
+    error "applyTypeConstructor: type constructor is already fullied applied"
+applyTypeConstructor _ _ =
+  error "applyTypeConstructor: expected TyConstructor"
+
+-- TODO: should probably ensure that the kinds of the type variables
+-- match.
+etaReduceTypeConstructor :: Type -> Type
+etaReduceTypeConstructor (TyAbs x _
+                          t@(TyConstructor
+                             (TypeConstructor { tycon_tyargs = tyargs })))
+  =
+  if length tyargs == 0 then
+    error
+    "etaReduceTypeConstructor: type constructor not applied to any arguments"
+  else
+    case last tyargs of
+      TyVar _ _ y ->
+        if x == y then
+          -- debugPrint ("t: " ++ showTypeLight t) $
+          -- debugPrint ("tyargs: " ++ show tyargs) $
+          chopTypeConstructor t
+        else
+          error "etaReduceTypeConstructor: variable names don't match"
+      _ ->
+        error "etaReduceTypeConstructor: expected last argument of type \
+              \constructor to be a TyVar"
+etaReduceTypeConstructor _ =
+  error "etaReduceTypeConstructor: expected TyAbs around a TyConstructor"
 
 
 -- A recursion scheme for types.
@@ -376,6 +449,38 @@ typeRec2M f t@(TyConstructor (TypeConstructor { tycon_tyargs = tyargs
 typeRec2M f ty = f ty
 
 
+-- Postorder traversal
+typeRec3M :: (Monoid a, Monad m) => (Type -> m a) -> Type -> m a
+typeRec3M f ty@(TyAbs _ _ s) = pure (<>) <*> typeRec2M f s <*> f ty
+typeRec3M f ty@(TyApp s t) =
+  pure (<>) <*> (pure (<>) <*> typeRec2M f s <*> typeRec2M f t) <*> f ty
+typeRec3M f ty@(TyArrow s t) =
+  pure (<>) <*> (pure (<>) <*> typeRec2M f s <*> typeRec2M f t) <*> f ty
+typeRec3M f ty@(TyRef s) =
+  pure (<>) <*> typeRec2M f s <*> f ty
+typeRec3M f ty@(TyVariant _ tyargs ctors) =
+  pure (<>) <*>
+  (pure (<>) <*>
+    (foldM (\acc x -> (<>) acc <$> typeRec2M f x) mempty tyargs) <*>
+    (foldM (\acc x -> (<>) acc <$> typeRec2M f x) mempty $
+    concat $ snd $ unzip ctors)) <*> f ty
+typeRec3M f ty@(TyRecord _ tyargs fields) =
+  pure (<>) <*>
+  (pure (<>) <*>
+    (foldM (\acc x -> (<>) acc <$> typeRec2M f x) mempty tyargs) <*>
+    (foldM (\acc x -> (<>) acc <$> typeRec2M f x) mempty
+     $ snd $ unzip fields)) <*> f ty
+typeRec3M f t@(TyConstructor (TypeConstructor { tycon_tyargs = tyargs
+                                              , tycon_ty = ty
+                                              , tycon_instantiated = inst })) =
+  pure (<>) <*>
+  (pure (<>) <*>
+   (pure (<>) <*>
+     (foldM (\acc x -> (<>) acc <$> typeRec2M f x) mempty tyargs) <*>
+    typeRec2M f ty) <*> typeRec2M f inst) <*> f t
+typeRec3M f ty = f ty
+
+
 -- A monoid recursion thingy for traversing two types simultaneously
 -- (presumably with the same structure).
 typesRec :: Monoid a => (Type -> Type -> a) -> Type -> Type -> a
@@ -460,7 +565,7 @@ data Term α =
   | TmMatch α (Term α) [(Pattern, Term α)]
   | TmRecord α [(Id, Term α)]
   -- info, class name, method name, type index
-  | TmPlaceholder α Id Id Type -- for class methods
+  | TmPlaceholder α ClassNm Id Type -- for class methods
   deriving (Eq, Foldable, Functor, Generic, Traversable)
 
 data Pattern =
@@ -547,6 +652,7 @@ termTypeRecM f = termRecM $
            TmPlaceholder fi x y ty -> TmPlaceholder fi x y <$> f ty
            _ -> return tm
 
+-- Substitute s for t in tm
 termSubst :: Eq α => Term α -> Term α -> Term α -> Term α
 termSubst s t = termRec $ \tm -> if tm == t then s else tm
 
@@ -562,9 +668,9 @@ data Command α =
   | CRecord α Id [Id] [(Id, Type)]
   | CAssert α (Term α)
   -- constraints, class name, class type variable, method names and types
-  | CClass α [Id] Id Id [(Id, Type)]
+  | CClass α [ClassNm] ClassNm Id [(Id, Type)]
   -- constraints, class name, instance type, method names and definitions
-  | CInstance α [(Id, Id)] Id Type [(Id, Term α)]
+  | CInstance α [(Id, ClassNm)] ClassNm Type [(Id, Term α)]
   deriving (Functor, Generic)
 
 
@@ -614,10 +720,10 @@ commandTypeRecM f (CInstance fi constrs nm ty methods) =
 -- like this because that's how things are parsed.. but it seems like
 -- it should be the other way around (not hard to map swap over the
 -- list in the parser).
-propagateClassConstraints :: [(Id, Id)] -> Type -> Type
+propagateClassConstraints :: [(Id, ClassNm)] -> Type -> Type
 propagateClassConstraints =
   flip $ foldl $
-  \acc (classNm, x) ->
+  \acc (x, classNm) ->
     flip typeRec acc $
     \ty -> case ty of
       TyVar b ctx y ->
@@ -626,7 +732,7 @@ propagateClassConstraints =
 
 -- This doesn't avoid capture. It assumes there are no type
 -- abstractions.
-propagateClassConstraintsCom :: [(Id, Id)] -> Command α -> Command α
+propagateClassConstraintsCom :: [(Id, ClassNm)] -> Command α -> Command α
 propagateClassConstraintsCom constrs =
   commandTypeRec $ propagateClassConstraints constrs
   -- flip $ foldl $
@@ -664,7 +770,7 @@ eraseData = (<$) ()
 
 instance Show Type where
   show =
-    debugPrint "showType" $
+    -- debugPrint "showType" $
     showType []
 
 showType :: [Id] -> Type -> String
@@ -701,7 +807,31 @@ showType nms (TyRecord nm tyargs fields) =
                       fields) ++ "))"
 -- showType nms (TyConstructor (TypeConstructor { tycon_name = nm } )) =
 --   "(TyConstructor " ++ show nm ++ ")"
-showType nms (TyConstructor tycon) = "(TyConstructor " ++ show tycon ++ ")"
+showType _ (TyConstructor tycon) = "(TyConstructor " ++ show tycon ++ ")"
+
+-- For printing types with less information.
+showTypeLight :: Type -> String
+showTypeLight (TyVar rigid ctx (Id s)) =
+  s ++ "{" ++ intercalate ", " (show <$> ctx) ++ "}" ++
+  (if rigid then "{R}" else "")
+showTypeLight (TyAbs (Id x) _ s) = "λ" ++ x ++ ". " ++ showTypeLight s
+showTypeLight (TyApp s t) = showTypeLight s ++ " " ++ showTypeLight t
+showTypeLight TyUnit = "unit"
+showTypeLight TyBool = "bool"
+showTypeLight TyInt = "int"
+showTypeLight TyChar = "char"
+showTypeLight (TyArrow s t) =
+  "(" ++ showTypeLight s ++ " -> " ++ showTypeLight t ++ ")"
+showTypeLight (TyRef ty) = "ref " ++ showTypeLight ty
+showTypeLight (TyName (Id nm)) = nm
+showTypeLight (TyVariant (Id nm) tyargs _) = nm ++ "(" ++ intercalate ", "
+                                             (showTypeLight <$> tyargs) ++ ")"
+showTypeLight (TyRecord (Id nm) tyargs _) = nm ++ "(" ++ intercalate ", "
+                                            (showTypeLight <$> tyargs) ++ ")"
+showTypeLight (TyConstructor (TypeConstructor { tycon_name = Id nm,
+                                                tycon_tyargs = tyargs })) =
+  nm ++ "(" ++ intercalate ", " (showTypeLight <$> tyargs) ++ ")"
+
 
 instance Eq Type where
   -- TyVar _ ctx1 x == TyVar _ ctx2 y = x == y && ctx1 == ctx2
@@ -722,7 +852,23 @@ instance Eq Type where
   TyRecord nm1 tyargs1 _ == TyRecord nm2 tyargs2 _ =
     nm1 == nm2 && tyargs1 == tyargs2
   -- TODO: type constructors
+  TyConstructor (TypeConstructor { tycon_name = nm1
+                                 , tycon_tyargs = tyargs1 }) ==
+    TyConstructor (TypeConstructor { tycon_name = nm2
+                                   , tycon_tyargs = tyargs2 }) =
+    nm1 == nm2 && tyargs1 == tyargs2
   _ == _ = False
+
+
+-- data TypeConstructor =
+--   TypeConstructor { tycon_name :: Id
+--                   , tycon_tyvars :: [Id]
+--                   , tycon_kinds :: [Kind]
+--                   , tycon_tyargs :: [Type]
+--                   , tycon_ty :: Type
+--                   , tycon_instantiated :: Type }
+--   deriving (Generic, Show)
+
 
 instance Arbitrary Type where
   arbitrary = genericArbitrary' Z uniform
@@ -741,7 +887,7 @@ instance Arbitrary TypeConstructor where
 
 instance Show (Term α) where
   show (TmVar _ x)         = show x
-  show (TmAbs _ x ty t)    = "(TmAbs " ++ show x ++ " " ++ show ty ++
+  show (TmAbs _ x ty t)    = "(TmAbs " ++ show x ++ " " ++ showTypeLight ty ++
                              " " ++ show t ++ ")"
   show (TmApp _ t1 t2)     = "(TmApp " ++ show t1 ++ " " ++ show t2 ++ ")"
   show (TmBool _ b)        = show b
@@ -764,7 +910,7 @@ instance Show (Term α) where
     "(TmRecord " ++ show fields ++ ")"
   show (TmPlaceholder _ classNm methodNm ty) =
     "(TmPlaceholder " ++ show classNm ++ " " ++ show methodNm ++ " "
-    ++ show ty ++ ")"
+    ++ showTypeLight ty ++ ")"
 
 -- instance Show α => Show (Term α) where
 --   show (TmVar fi x)         = "(TmVar " ++ show fi ++ " " ++ show x ++ ")"
@@ -799,7 +945,8 @@ instance Show α => Show (Command α) where
   show (CEval _ t)   = "(CEval " ++ show t ++ ")"
   show (CCheck _ t)  = "(CCheck " ++ show t ++ ")"
   show (CAssert _ t) = "(CAssert " ++ show t ++ ")"
-  show (CData _ x _ _) = "(CData " ++ show x ++ ")"
+  show (CData _ x tyvars constrs) =
+    "(CData " ++ show x ++ " " ++ show tyvars ++ " " ++ show constrs ++ ")"
   show (CRecord _ x _ _) = "(CRecord " ++ show x ++ ")"
   show (CClass _ constrs nm tyvar methods) =
     "(CClass (" ++ intercalate " " (show <$> constrs) ++ ") " ++
@@ -925,6 +1072,10 @@ mkTyAbs :: [Id] -> Type -> Type
 mkTyAbs [] ty = ty
 mkTyAbs (y:ys) ty = TyAbs y KStar $ mkTyAbs ys ty
 
+unTyAbs :: Type -> Type
+unTyAbs (TyAbs _ _ t) = unTyAbs t
+unTyAbs t = t
+
 -- Apply a type to a list of arguments.
 mkTyApp :: Type -> [Type] -> Type
 mkTyApp s [] = s
@@ -1028,7 +1179,7 @@ instance FreeTyVars a => FreeTyVars [a] where
 -- (don't normalize types before computing their free type variables).
 instance FreeTyVars Type where
   freetyvars = nub . flip evalState [] .
-    (typeRec2M $
+    (typeRec3M $
      \ty ->
        case ty of
               ty@(TyVar _ _ _) -> do
@@ -1036,9 +1187,13 @@ instance FreeTyVars Type where
                 return $ if ty `elem` xs then [] else [ty]
               ty@(TyAbs x _ _) ->
                 modify ((:) $ mkTyVar x) >> return []
-              ty@(TyConstructor (TypeConstructor
-                                 { tycon_tyvars = tyvars })) ->
-                modify ((++) $ mkTyVar <$> tyvars) >> return []
+
+              -- TODO: Do we even need to handle this case? I don't
+              -- think so...
+              -- ty@(TyConstructor (TypeConstructor
+              --                    { tycon_tyvars = tyvars })) ->
+              --   modify ((++) $ mkTyVar <$> tyvars) >> return []
+                -- return $ mkTyVar <$> tyvars
               _ -> return [])
 
 
@@ -1048,7 +1203,7 @@ instance FreeTyVars Type where
 -- match s against t, returning the type in s that corresponds to the
 -- type variable with id x in t.
 match_type :: Id -> Type -> Type -> Maybe Type
-match_type x s t@(TyVar _ _ y) =
+match_type x s (TyVar _ _ y) =
   if x == y then Just s else Nothing
 match_type x (TyArrow s1 t1) (TyArrow s2 t2) =
   firstJust $ uncurry (match_type x) <$> [(s1, s2), (t1, t2)]
@@ -1064,7 +1219,7 @@ match_type x (TyRecord nm1 tys1 _) (TyRecord nm2 tys2 _) =
 match_type x (TyConstructor (TypeConstructor { tycon_name = nm1
                                              , tycon_tyargs = tyargs1 }))
              (TyConstructor (TypeConstructor { tycon_name = nm2
-                                             , tycon_tyargs = tyargs2})) =
+                                             , tycon_tyargs = tyargs2 })) =
   if nm1 == nm2 then
     firstJust $ uncurry (match_type x) <$> zip tyargs1 tyargs2
   else Nothing
@@ -1072,12 +1227,20 @@ match_type x (TyConstructor (TypeConstructor { tycon_name = nm1
 -- in for a type constructor which is applied to something. I suppose
 -- this could only match with a type constructor?
 -- Is this sufficient?
-match_type x s (TyApp (TyVar _ _ y) _) = if x == y then Just s else Nothing
+-- match_type x s (TyApp (TyVar _ _ y) _) = if x == y then Just s else Nothing
+match_type x (TyApp s1 t1) (TyApp s2 t2) =
+  firstJust $ uncurry (match_type x) <$> [(s1, s2), (t1, t2)]
 match_type _ _ _ = Nothing
 
 
+-- Used when looking up instances of a class for a given type. The
+-- first argument is the given type, and the right is the type
+-- associated with some instance. We want type variables on the RHS to
+-- be compatible with anything on the left since the instance is
+-- general in that variable.
 compatible :: Type -> Type -> Bool
 compatible (TyVar _ _ _) (TyVar _ _ _) = True
+compatible _ (TyVar _ _ _) = True
 compatible (TyAbs _ k1 s) (TyAbs _ k2 t) = k1 == k2 && compatible s t
 compatible TyUnit TyUnit = True
 compatible TyBool TyBool = True

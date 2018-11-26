@@ -34,8 +34,11 @@ main = do
   -- let ast = parseOnly src'
   -- putStrLn $ "\nParsed:\n" ++ show ast
 
-  let ast' = parseAndTycheck src'
-  putStrLn $ "\nTypechecked:\n" ++ show ast'
+  -- let ast = parseGenOnly src'
+  -- putStrLn $ "\nParsed:\n" ++ show ast
+
+  -- let ast' = parseAndTycheck src'
+  -- seq ast' $ putStrLn $ "\nTypechecked:\n" ++ show ast'
 
   -- let tyx = TyVar False (Id "x")
   -- let tyy = TyVar False (Id "y")
@@ -57,8 +60,9 @@ main = do
   -- Parse and typecheck the final source code.
   -- On success, run the interpreter on the AST.
   result <- case parseAndTycheck src' of
-              Left s -> error s
+              Left s -> putStrLn "" >> error s
               Right (p', warnings) -> do
+                -- putStrLn $ "\nTypechecked:\n" ++ show p'
                 forM_ warnings putStrLn
                 return $ interpProg p'
 

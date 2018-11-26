@@ -2,19 +2,23 @@
 data Pair a b =
   | Pair a b
 
+# Maybe change the data syntax to this:
+# data Pair a b
+# | Pair a b
+
 pure proj1 : a × b → a
-def proj1 = λ p.
+def proj1 = λp.
   destruct p as
   | (x, _) → x
 
 pure proj2 : a × b → b
-def proj2 = λ p.
+def proj2 = λp.
   destruct p as
   | (_, y) → y
 
 # Thinking of changing the destruct syntax to this. Change 'destruct' to
 # 'case' just because it's shorter, and get rid of other keyword entirely.
--- def proj2 = λ p.
+-- def proj2 = λp.
 --   case p
 --   | (_, y) → y
 
@@ -32,8 +36,123 @@ class Functor f where
   | fmap : (a → b) → f a → f b
 
 instance Functor (Pair a) where
-  | fmap = λf. λp. (p₁, f (p₂))
+  | fmap = λf. λp. (p₁, f p₂)
 
-def p = (0, ⊤)
+def p = (⊤, 0)
 
-run fmap (λx. x + 1) p
+data StateT s m a =
+  | StateT (s → m (s × a))
+
+# Temporary until we have general bifunctors.
+pure bimap : (a → c) → (b → d) → a × b → c × d
+def bimap = λf. λg. λp.
+  destruct p as
+  | (x, y) → (f x, g y)
+
+-- pure first : (a → c) → a × b → c × b
+-- def first = λf. bimap f (λx. x)
+
+pure second : (b → c) → a × b → a × c
+def second = bimap (λx. x)
+
+-- pure second : (b → c) → a × b → a × c
+-- def second = λf. λp.
+--   destruct p as
+--   | (x, y) → (x, f y)
+
+instance Functor m => Functor (StateT s m) where
+-- instance Functor (StateT s m) where
+  | fmap =
+    λf. λa.
+    destruct a as
+    | StateT g → StateT (λs. fmap (second f) (g s))
+    -- | StateT g → StateT (λs. fmap f (g s))
+    -- | StateT g →
+    --   StateT (λs. fmap (λp. destruct p as
+    --                         | (x, y) -> (x, f y)) (g s))
+
+-- run fmap (λx. x + 1) p
+
+-- run second (λx. x + 1) p
+
+data Identity a =
+  | Identity a
+
+pure runIdentity : Identity a → a
+def runIdentity = λx. destruct x as
+  | Identity y → y
+
+-- pure runState : StateT s m a → s → m (s × a)
+-- def runState = λs. λm. destruct m as
+--   | StateT f -> f s
+
+
+-- data List a =
+--   | Nil
+--   | Cons a (List a)
+
+-- pure map : (a → b) → [a] → [b]
+-- def map = λf. λl.
+--   destruct l as
+--   | Nil → Nil
+--   | Cons x l' → Cons (f x) (map f l')
+
+-- -- TODO: Check that the kind of the type index is correct. The
+-- -- following causes an error because it isn't checked.
+-- -- instance Functor (List a) where
+-- instance Functor List where
+--   | fmap = map
+
+-- def l = Cons 0 (Cons 1 (Cons 2 Nil))
+
+-- run fmap (λx. x + 1) l
+
+
+instance Functor Identity where
+  | fmap = λf. λx. destruct x as
+      | Identity y -> Identity (f y)
+
+-- pure runState : StateT s Identity a → s → (s × a)
+-- def runState = λm. λs. destruct m as
+--   | StateT f -> destruct f s as
+--     | Identity x -> x
+
+pure runStateT : StateT s m a → s → m (s × a)
+def runStateT = λm. λs. destruct m as
+  | StateT f → f s
+
+pure compose : (a → b) → (b → c) → a → c
+-- pure compose : (aa → bb) → (bb → cc) → aa → cc
+def compose = λf. λg. λx. g (f x)
+
+pure flip : (a → b → c) → b → a → c
+def flip = λf. λx. λy. f y x
+
+pure runState : StateT s Identity a → s → (s × a)
+-- def runState = λm. λs. destruct m as
+--   | StateT f → runIdentity (f s)
+def runState = (flip compose runIdentity) ∘ runStateT
+-- def runState = λm. λs. runIdentity (runStateT m s)
+
+
+pure comp : StateT Int Identity Int
+def comp = StateT (λx. Identity (x, 0))
+
+-- def asdf = fmap (λx. x + 1) (runState m 123)
+
+-- run asdf
+
+-- pure asdf : StateT Int Identity Int
+-- def asdf = fmap (λx. x + 1) m
+
+
+-- run asdf
+
+-- run fmap (λx. x + 1) comp
+
+-- run destruct fmap (λx. x + 1) comp as
+--   | StateT g -> g 0
+
+-- run π₂ (runIdentity (runStateT (fmap (λx. x + 1) comp) 0))
+run π₂ (runState (fmap (λx. x + 1) comp) 0)
+# ==> (123, 1)

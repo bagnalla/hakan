@@ -298,20 +298,21 @@ Command :
   | assert BExp { Ast.CAssert $1 $2 }
   | check Term { Ast.CCheck $1 $2 }
   | class ClassConstraints fatarrow capid id where barlist(FieldDecl)
-      { Ast.CClass $1 (map fst $2) (idFromToken $4) (idFromToken $5) $7 }
+      { Ast.CClass $1 (map snd $2) (Ast.ClassNm $ idFromToken $4) (idFromToken $5) $7 }
   | class capid id where barlist(FieldDecl)
-      { Ast.CClass $1 [] (idFromToken $2) (idFromToken $3) $5 }
+      { Ast.CClass $1 [] (Ast.ClassNm $ idFromToken $2) (idFromToken $3) $5 }
   | instance ClassConstraints fatarrow capid Type
     where barlist(InstanceMethod)
-      { Ast.CInstance $1 (map swap $2) (idFromToken $4) $5 $7 }
+--      { Ast.CInstance $1 (map swap $2) (Ast.ClassNm $ idFromToken $4) $5 $7 }
+      { Ast.CInstance $1 $2 (Ast.ClassNm $ idFromToken $4) $5 $7 }
   | instance capid Type where barlist(InstanceMethod)
-      { Ast.CInstance $1 [] (idFromToken $2) $3 $5 }
+      { Ast.CInstance $1 [] (Ast.ClassNm $ idFromToken $2) $3 $5 }
 
 FieldDecl :
   id TyBinder { (idFromToken $1, $2) }
 
 ClassConstraint :
-  capid id { (idFromToken $1, idFromToken $2) }
+  capid id { (idFromToken $2, Ast.ClassNm (idFromToken $1)) }
 
 ClassConstraints :
   ClassConstraint { [$1] }
@@ -323,9 +324,11 @@ TyBinder :
 TyDeclBinder :
   -- Propagate class constraints to type variables. Doesnt avoid capture.
   -- Assumes there are no type abstractions.
-  ':' ClassConstraints fatarrow Type
-    { Ast.propagateClassConstraints $2 $4 }
-  | ':' Type { $2 }
+--  ':' ClassConstraints fatarrow Type
+--    { Ast.propagateClassConstraints $2 $4 }
+-- TODO: fix this so that we can have class constraints without a conflict
+-- with type application syntax :(
+  ':' Type { $2 }
 
 Binder :
   '=' Term { $2 }
