@@ -44,10 +44,10 @@ pure tuple : (a → b) → (a → c) → a → b × c
 def tuple = λf. λg. λx. (f x, g x)
 
 pure pair_fun : (a → c) → (b → d) → a × b → c × d
-def pair_fun = λf. λg. λp. (f p₁, g p₂)
+-- def pair_fun = λf. λg. λp. (f p₁, g p₂)
 
 # This should be equivalent to the above.
--- def pair_fun = λf. λg. ⟨f ∘ π₁, g ∘ π₂⟩
+def pair_fun = λf. λg. ⟨f ∘ π₁, g ∘ π₂⟩
 
 # Function cotupling.
 pure cotuple : (a → c) → (b → c) → a + b → c

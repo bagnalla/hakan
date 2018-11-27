@@ -1,4 +1,18 @@
 
+# The identity function
+pure id : a → a
+def id = λx. x
+
+pure flip : (a → b → c) → b → a → c
+def flip = λf. λx. λy. f y x
+
+# Function composition.
+pure compose : (b → c) → (a → b) → a → c
+def compose = λf. λg. λx. f (g x)
+
+pure postcompose : (a → b) → (b → c) → a → c
+def postcompose = flip compose
+
 data Pair a b =
   | Pair a b
 
@@ -32,48 +46,72 @@ def proj2 = λp.
 -- def proj2 (_, y) = y
 
 # Here we can get rid of the 'where' keyword.
-class Functor f where
+class Functor f
   | fmap : (a → b) → f a → f b
 
-instance Functor (Pair a) where
-  | fmap = λf. λp. (p₁, f p₂)
+class Bifunctor f
+  | bimap : (a → c) → (b → d) → f a b → f c d
 
-def p = (⊤, 0)
+class Profunctor f
+  | dimap : (c → a) → (b → d) → f a b → f c d
+
+instance Bifunctor Pair
+  | bimap = λf. λg. λp.
+    destruct p as
+    | (x, y) → (f x, g y)
+
+data Reader a b =
+  | Reader (a → b)
+
+pure runReader : Reader a b → a → b
+def runReader = λr. destruct r as | Reader f → f
+
+instance Profunctor Reader
+  | dimap = λf. λg. λh. Reader (g ∘ runReader h ∘ f)
+
+pure first : (a → c) → a × b → c × b
+def first = flip bimap id
+-- def first = λf. λp. destruct p as
+--   | (x, y) → (f x, y)
+-- def first = λf. bimap f id
+
+-- run first id (0, 0)
+
+-- pure f : Int × Int → Int × Int
+-- -- def f = bimap id id
+-- def f = bimap (λx. x + 2) (λx. x + 1)
+-- run f (0, 0)
+
+pure second : (b → c) → a × b → a × c
+def second = bimap id
+
+-- -- instance Functor (Pair a) where
+-- --   | fmap = λf. λp. (p₁, f p₂)
+
+-- instance Functor (Pair a) where
+--   | fmap = second
+
+-- def p = (⊤, 0)
 
 data StateT s m a =
-  | StateT (s → m (s × a))
+  | StateT (s → m (a × s))
 
 # Temporary until we have general bifunctors.
-pure bimap : (a → c) → (b → d) → a × b → c × d
-def bimap = λf. λg. λp.
-  destruct p as
-  | (x, y) → (f x, g y)
+-- pure bimap : (a → c) → (b → d) → a × b → c × d
+-- def bimap = λf. λg. λp.
+--   destruct p as
+--   | (x, y) → (f x, g y)
 
 -- pure first : (a → c) → a × b → c × b
 -- def first = λf. bimap f (λx. x)
 
-pure second : (b → c) → a × b → a × c
-def second = bimap (λx. x)
+-- pure second : (b → c) → a × b → a × c
+-- def second = bimap (λx. x)
 
 -- pure second : (b → c) → a × b → a × c
 -- def second = λf. λp.
 --   destruct p as
 --   | (x, y) → (x, f y)
-
-instance Functor m => Functor (StateT s m) where
--- instance Functor (StateT s m) where
-  | fmap =
-    λf. λa.
-    destruct a as
-    | StateT g → StateT (λs. fmap (second f) (g s))
-    -- | StateT g → StateT (λs. fmap f (g s))
-    -- | StateT g →
-    --   StateT (λs. fmap (λp. destruct p as
-    --                         | (x, y) -> (x, f y)) (g s))
-
--- run fmap (λx. x + 1) p
-
--- run second (λx. x + 1) p
 
 data Identity a =
   | Identity a
@@ -82,10 +120,19 @@ pure runIdentity : Identity a → a
 def runIdentity = λx. destruct x as
   | Identity y → y
 
--- pure runState : StateT s m a → s → m (s × a)
--- def runState = λs. λm. destruct m as
---   | StateT f -> f s
+pure runStateT : StateT s m a → s → m (a × s)
+def runStateT = λm. λs. destruct m as
+  | StateT f → f s
 
+pure runState : StateT s Identity a → s → (a × s)
+-- def runState = λm. λs. runIdentity (runStateT m s)
+def runState = (compose runIdentity) ∘ runStateT
+
+instance Functor m => Functor (StateT s m)
+-- instance Functor (StateT s m) where
+  | fmap = λf. λa. StateT (λs. fmap (first f) (runStateT a s))
+  -- | fmap = λf. λa. destruct a as
+  --   | StateT g → StateT (λs. fmap (first f) (g s))
 
 -- data List a =
 --   | Nil
@@ -108,51 +155,47 @@ def runIdentity = λx. destruct x as
 -- run fmap (λx. x + 1) l
 
 
-instance Functor Identity where
-  | fmap = λf. λx. destruct x as
-      | Identity y -> Identity (f y)
+instance Functor Identity
+  -- | fmap = λf. λx. destruct x as
+  --     | Identity y -> Identity (f y)
+  -- | fmap = λf. λx. Identity (f (runIdentity x))
+  | fmap = λf. Identity ∘ f ∘ runIdentity
+  -- | fmap = postcompose runIdentity ∘ compose Identity
+
+-- -- pure runState : StateT s Identity a → s → (s × a)
+-- -- def runState = λm. λs. destruct m as
+-- --   | StateT f -> destruct f s as
+-- --     | Identity x -> x
+
+-- pure runStateT : StateT s m a → s → m (s × a)
+-- def runStateT = λm. λs. destruct m as
+--   | StateT f → f s
 
 -- pure runState : StateT s Identity a → s → (s × a)
--- def runState = λm. λs. destruct m as
---   | StateT f -> destruct f s as
---     | Identity x -> x
-
-pure runStateT : StateT s m a → s → m (s × a)
-def runStateT = λm. λs. destruct m as
-  | StateT f → f s
-
-pure compose : (a → b) → (b → c) → a → c
--- pure compose : (aa → bb) → (bb → cc) → aa → cc
-def compose = λf. λg. λx. g (f x)
-
-pure flip : (a → b → c) → b → a → c
-def flip = λf. λx. λy. f y x
-
-pure runState : StateT s Identity a → s → (s × a)
--- def runState = λm. λs. destruct m as
---   | StateT f → runIdentity (f s)
-def runState = (flip compose runIdentity) ∘ runStateT
--- def runState = λm. λs. runIdentity (runStateT m s)
+-- -- def runState = λm. λs. destruct m as
+-- --   | StateT f → runIdentity (f s)
+-- def runState = (postcompose runIdentity) ∘ runStateT
+-- -- def runState = λm. λs. runIdentity (runStateT m s)
 
 
 pure comp : StateT Int Identity Int
 def comp = StateT (λx. Identity (x, 0))
 
--- def asdf = fmap (λx. x + 1) (runState m 123)
+-- -- def asdf = fmap (λx. x + 1) (runState m 123)
 
--- run asdf
+-- -- run asdf
 
--- pure asdf : StateT Int Identity Int
--- def asdf = fmap (λx. x + 1) m
+-- -- pure asdf : StateT Int Identity Int
+-- -- def asdf = fmap (λx. x + 1) m
 
 
--- run asdf
+-- -- run asdf
 
 -- run fmap (λx. x + 1) comp
 
--- run destruct fmap (λx. x + 1) comp as
---   | StateT g -> g 0
+-- -- run destruct fmap (λx. x + 1) comp as
+-- --   | StateT g -> g 0
 
--- run π₂ (runIdentity (runStateT (fmap (λx. x + 1) comp) 0))
+-- -- run π₂ (runIdentity (runStateT (fmap (λx. x + 1) comp) 0))
 run π₂ (runState (fmap (λx. x + 1) comp) 0)
-# ==> (123, 1)
+-- # ==> (123, 1)

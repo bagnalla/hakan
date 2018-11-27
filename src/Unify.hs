@@ -96,9 +96,9 @@ unify fi η ψ ((s', t') : xs) =
     do
       case t of
         TyVar b ctx x -> do
-          -- TODO: if t is rigid, then instead of taking the set union
-          -- of class constraints we just check that the constraints
-          -- of s is a subset of the constraints of t.
+          -- If t is rigid, then instead of taking the set union of
+          -- class constraints we just check that the constraints of s
+          -- is a subset of the constraints of t.
           if isRigid t then
             if isSubsetOf (ctxOfType s) ctx then do
               let xs' = tysubst' t s xs
@@ -172,17 +172,13 @@ unify fi η ψ ((s', t') : xs) =
         unify fi η ψ $ [(s1, t1), (s2, t2)] ++ xs
       _ -> return $ Left (s, t, "Incompatible types")
 
-  -- TODO: We shouldn't have to handle this case. All of the naked
-  -- type abstractions and applications should be wrapped in
-  -- TypeConstructors before this point. However, we will still need
-  -- to handle a similar situation in which one of the type
-  -- constructors is a type variable.
   else if isTyApp s && isTyConstructor t then
     -- debugPrint "\nAAA" $
     -- debugPrint (showTypeLight s) $
-    -- debugPrint (showTypeLight t) $
+    -- debugPrint (showTypeLight t) $    
     case (s, t) of
-      (TyApp s1@(TyVar _ _ x) s2, 
+      -- (TyApp s1@(TyVar _ _ x) s2,
+      (TyApp s1 s2, 
         TyConstructor (TypeConstructor { tycon_tyargs = tyargs })) ->
         if length tyargs > 0 then do
           let t2 = last tyargs
@@ -192,10 +188,10 @@ unify fi η ψ ((s', t') : xs) =
           --   debugPrint ("s2: " ++ showTypeLight s2) $
           --   debugPrint ("t2: " ++ showTypeLight t2) $
           unify fi η ψ $ (s1, chopTypeConstructor t) : (s2, t2) : xs
-          -- return $ Left (s, t, "unimplemented")
         else
           return $ Left (s, t, "Incompatible types")
       _ -> return $ Left (s, t, "Incompatible types")
+            
   -- Swap s and t and try again.
   else if isTyConstructor s && isTyApp t then
     -- debugPrint ("BBB: " ++ showTypeLight s ++ ", " ++ showTypeLight t) $
@@ -258,15 +254,21 @@ resolveInstance ψ ty classNm =
         concat <$> sequence ((uncurry go) <$> zip tyargs1 tyargs2)
       else
         Nothing
+
     -- Everything else should fail.
 
     -- go
     --   (TyConstructor (TypeConstructor { tycon_instantiated = tycon_inst }))
     --   t =
+    --   debugPrint ("AAA") $
+    --   debugPrint (showTypeLight t) $
     --   go tycon_inst t
     -- go t
     --   (TyConstructor (TypeConstructor { tycon_instantiated = tycon_inst }))
-    --   = go t tycon_inst
+    --   =
+    --   debugPrint ("BBB") $
+    --   debugPrint (showTypeLight t) $
+    --   go t tycon_inst
 
     -- go (TyAbs x k ty) (TyAbs x k ty)
     

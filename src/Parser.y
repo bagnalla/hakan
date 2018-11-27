@@ -188,7 +188,7 @@ Term :
   | BExp { $1 }
   | Term ":=" Term { Ast.TmBinop $2 Ast.BUpdate $1 $3 }
   | Term '∘' Term
-    { Ast.TmApp $2 (Ast.TmApp $2  (Ast.TmVar $2 (Id "compose")) $3) $1 }
+    { Ast.TmApp $2 (Ast.TmApp $2  (Ast.TmVar $2 (Id "compose")) $1) $3 }
   | Term ';' Term { Ast.TmApp $2 (Ast.TmAbs $2 (Id "_") Ast.TyUnit $3) $1 }
   | let id '=' Term in Term { Ast.TmLet $1 (idFromToken $2) $4 $6 }
   | Term '▿' Term
@@ -297,16 +297,27 @@ Command :
       { Ast.CRecord $1 (idFromToken $2) (map idFromToken $3) $6 }
   | assert BExp { Ast.CAssert $1 $2 }
   | check Term { Ast.CCheck $1 $2 }
-  | class ClassConstraints fatarrow capid id where barlist(FieldDecl)
-      { Ast.CClass $1 (map snd $2) (Ast.ClassNm $ idFromToken $4) (idFromToken $5) $7 }
-  | class capid id where barlist(FieldDecl)
-      { Ast.CClass $1 [] (Ast.ClassNm $ idFromToken $2) (idFromToken $3) $5 }
-  | instance ClassConstraints fatarrow capid Type
-    where barlist(InstanceMethod)
---      { Ast.CInstance $1 (map swap $2) (Ast.ClassNm $ idFromToken $4) $5 $7 }
-      { Ast.CInstance $1 $2 (Ast.ClassNm $ idFromToken $4) $5 $7 }
-  | instance capid Type where barlist(InstanceMethod)
-      { Ast.CInstance $1 [] (Ast.ClassNm $ idFromToken $2) $3 $5 }
+
+--  | class ClassConstraints fatarrow capid id where barlist(FieldDecl)
+--      { Ast.CClass $1 (map snd $2) (Ast.ClassNm $ idFromToken $4) (idFromToken $5) $7 }
+--  | class capid id where barlist(FieldDecl)
+--      { Ast.CClass $1 [] (Ast.ClassNm $ idFromToken $2) (idFromToken $3) $5 }
+
+  | class ClassConstraints fatarrow capid id barlist(FieldDecl)
+      { Ast.CClass $1 (map snd $2) (Ast.ClassNm $ idFromToken $4) (idFromToken $5) $6 }
+  | class capid id barlist(FieldDecl)
+      { Ast.CClass $1 [] (Ast.ClassNm $ idFromToken $2) (idFromToken $3) $4 }
+
+--  | instance ClassConstraints fatarrow capid Type
+--    where barlist(InstanceMethod)
+--      { Ast.CInstance $1 $2 (Ast.ClassNm $ idFromToken $4) $5 $7 }
+--  | instance capid Type where barlist(InstanceMethod)
+--      { Ast.CInstance $1 [] (Ast.ClassNm $ idFromToken $2) $3 $5 }
+
+  | instance ClassConstraints fatarrow capid Type barlist(InstanceMethod)
+      { Ast.CInstance $1 $2 (Ast.ClassNm $ idFromToken $4) $5 $6 }
+  | instance capid Type barlist(InstanceMethod)
+      { Ast.CInstance $1 [] (Ast.ClassNm $ idFromToken $2) $3 $4 }
 
 FieldDecl :
   id TyBinder { (idFromToken $1, $2) }

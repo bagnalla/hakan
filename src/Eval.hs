@@ -103,12 +103,14 @@ eval (TmApp _ t1 t2) = do
       -- debugPrint ("v1: " ++ show v1) $
       -- Force call-by-value order with seq
       seq v2 $ local (const $ extendEnv nm v2 clos) $ eval body
-    _ ->
-      debugPrint ("tm1: " ++ show t1) $
-      debugPrint ("v1: " ++ show v1) $
-      debugPrint ("tm2: " ++ show t2) $
-      debugPrint ("v2: " ++ show v2) $
-      evalError $ "eval: " ++ show v1 ++ " isn't a closure"
+    _ -> do
+      env <- ask
+      debugPrint ("env:\n" ++ show env) $
+        debugPrint ("tm1: " ++ show t1) $
+        debugPrint ("v1: " ++ show v1) $
+        debugPrint ("tm2: " ++ show t2) $
+        debugPrint ("v2: " ++ show v2) $
+        evalError $ "eval: " ++ show v1 ++ " isn't a closure"
 
 eval (TmUnit _) = return VUnit
 eval (TmBool _ b) = return $ VBool b

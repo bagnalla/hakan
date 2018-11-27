@@ -20,7 +20,7 @@ module Ast (
   termRec2, termSubst, match_type, mkPair, mkProj1, mkProj2, mkAppTree,
   mkTupleProjection, mkApp, compatible, mkTuple, typesRec, isTmVar,
   showTypeLight, chopTypeConstructor, applyTypeConstructor,
-  etaReduceTypeConstructor, ClassNm(..)
+  etaReduceTypeConstructor, ClassNm(..), containsType
   ) where
 
 
@@ -160,6 +160,7 @@ data TypeClass =
   TypeClass { tyclass_constrs :: [ClassNm] -- superclass constraints
             , tyclass_name :: ClassNm
             , tyclass_index :: Id
+            , tyclass_index_kind :: Kind
             , tyclass_methods :: [(Id, Type)]}
   deriving Show
 
@@ -770,8 +771,8 @@ eraseData = (<$) ()
 
 instance Show Type where
   show =
-    -- debugPrint "showType" $
-    showType []
+    -- showType []
+    showTypeLight
 
 showType :: [Id] -> Type -> String
 showType _ (TyVar b ctx (Id s)) =
@@ -886,31 +887,93 @@ instance Arbitrary TypeConstructor where
 -- | S-expression show instances
 
 instance Show (Term α) where
-  show (TmVar _ x)         = show x
-  show (TmAbs _ x ty t)    = "(TmAbs " ++ show x ++ " " ++ showTypeLight ty ++
-                             " " ++ show t ++ ")"
-  show (TmApp _ t1 t2)     = "(TmApp " ++ show t1 ++ " " ++ show t2 ++ ")"
-  show (TmBool _ b)        = show b
-  show (TmIf _ t1 t2 t3)   = "(TmIf " ++ show t1 ++ " " ++ show t2 ++
-                             " " ++ show t3 ++ ")"
-  show (TmInt _ i)         = "(TmInt " ++ show i ++ ")"
-  show (TmChar _ c)        = "(TmChar " ++ show c ++ ")"
-  show (TmBinop _ b t1 t2) = "(TmBinop " ++ show b ++ " " ++ show t1 ++
-                             " " ++ show t2 ++ ")"
-  show (TmUnop _ u t)   = "(TmUnop " ++ show u ++ " " ++ show t ++ ")"
-  show (TmUnit _)       = "tt"
-  show (TmLet _ x tm1 tm2) =
-    "(TmLet " ++ show x ++ " " ++ show tm1 ++ " " ++ show tm2 ++ ")"
-  show (TmVariant _ x tms) =
-    "(TmVariant " ++ show x ++ " " ++ show tms ++ ")"
-  show (TmMatch _ discrim cases) =
-    "(TmMatch " ++ show discrim ++ " " ++
-    (intercalate " " (map show cases)) ++ ")"
-  show (TmRecord _ fields) =
-    "(TmRecord " ++ show fields ++ ")"
-  show (TmPlaceholder _ classNm methodNm ty) =
-    "(TmPlaceholder " ++ show classNm ++ " " ++ show methodNm ++ " "
-    ++ showTypeLight ty ++ ")"
+  -- show = showTerm
+  show = showTermLight
+
+-- instance Show (Term α) where
+--   show (TmVar _ x)         = show x
+--   show (TmAbs _ x ty t)    = "(TmAbs " ++ show x ++ " " ++ showTypeLight ty ++
+--                              " " ++ show t ++ ")"
+--   show (TmApp _ t1 t2)     = "(TmApp " ++ show t1 ++ " " ++ show t2 ++ ")"
+--   show (TmBool _ b)        = show b
+--   show (TmIf _ t1 t2 t3)   = "(TmIf " ++ show t1 ++ " " ++ show t2 ++
+--                              " " ++ show t3 ++ ")"
+--   show (TmInt _ i)         = "(TmInt " ++ show i ++ ")"
+--   show (TmChar _ c)        = "(TmChar " ++ show c ++ ")"
+--   show (TmBinop _ b t1 t2) = "(TmBinop " ++ show b ++ " " ++ show t1 ++
+--                              " " ++ show t2 ++ ")"
+--   show (TmUnop _ u t)   = "(TmUnop " ++ show u ++ " " ++ show t ++ ")"
+--   show (TmUnit _)       = "tt"
+--   show (TmLet _ x tm1 tm2) =
+--     "(TmLet " ++ show x ++ " " ++ show tm1 ++ " " ++ show tm2 ++ ")"
+--   show (TmVariant _ x tms) =
+--     "(TmVariant " ++ show x ++ " " ++ show tms ++ ")"
+--   show (TmMatch _ discrim cases) =
+--     "(TmMatch " ++ show discrim ++ " " ++
+--     (intercalate " " (map show cases)) ++ ")"
+--   show (TmRecord _ fields) =
+--     "(TmRecord " ++ show fields ++ ")"
+--   show (TmPlaceholder _ classNm methodNm ty) =
+--     "(TmPlaceholder " ++ show classNm ++ " " ++ show methodNm ++ " "
+--     ++ showTypeLight ty ++ ")"
+
+showTerm :: Term α -> String
+showTerm (TmVar _ x) = show x
+showTerm (TmAbs _ x ty t) =
+  "(TmAbs " ++ show x ++ " " ++ show ty ++ " " ++ showTerm t ++ ")"
+showTerm (TmApp _ t1 t2) =
+  "(TmApp " ++ showTerm t1 ++ " " ++ showTerm t2 ++ ")"
+showTerm (TmBool _ b) = show b
+showTerm (TmIf _ t1 t2 t3) =
+  "(TmIf " ++ showTerm t1 ++ " " ++ showTerm t2 ++ " " ++ showTerm t3 ++ ")"
+showTerm (TmInt _ i) = "(TmInt " ++ show i ++ ")"
+showTerm (TmChar _ c) = "(TmChar " ++ show c ++ ")"
+showTerm (TmBinop _ b t1 t2) =
+  "(TmBinop " ++ show b ++ " " ++ showTerm t1 ++ " " ++ showTerm t2 ++ ")"
+showTerm (TmUnop _ u t) = "(TmUnop " ++ show u ++ " " ++ showTerm t ++ ")"
+showTerm (TmUnit _) = "tt"
+showTerm (TmLet _ x tm1 tm2) =
+  "(TmLet " ++ show x ++ " " ++ showTerm tm1 ++ " " ++ showTerm tm2 ++ ")"
+showTerm (TmVariant _ x tms) =
+  "(TmVariant " ++ show x ++ " [" ++ intercalate ", " (showTerm <$> tms) ++ "])"
+showTerm (TmMatch _ discrim cases) =
+  "(TmMatch " ++ show discrim ++ " [" ++
+  (intercalate ", " (show <$> (bimap show showTerm <$> cases))) ++ "])"
+showTerm (TmRecord _ fields) =
+  "(TmRecord [" ++
+  (intercalate ", " (show <$> (bimap show showTerm <$> fields))) ++ "])"
+showTerm (TmPlaceholder _ classNm methodNm ty) =
+  "(TmPlaceholder " ++ show classNm ++ " " ++ show methodNm ++ " "
+  ++ show ty ++ ")"
+
+showTermLight :: Term α -> String
+showTermLight (TmVar _ x) = show x
+showTermLight (TmAbs _ x ty t) =
+  "λ" ++ show x ++ ":" ++ show ty ++ ". " ++ showTermLight t
+showTermLight (TmApp _ t1 t2) =
+  "(" ++ showTermLight t1 ++ " " ++ showTermLight t2 ++ ")"
+showTermLight (TmBool _ b) = show b
+showTermLight (TmIf _ t1 t2 t3) =
+  "if " ++ showTermLight t1 ++ " then " ++ showTermLight t2 ++ " else "
+  ++ showTermLight t3
+showTermLight (TmInt _ i) = show i
+showTermLight (TmChar _ c) = "'" ++ show c ++ "'"
+showTermLight (TmBinop _ b t1 t2) =
+  showTermLight t1 ++ " " ++ show b ++ " " ++ showTermLight t2
+showTermLight (TmUnop _ u t) = show u ++ " " ++ showTermLight t
+showTermLight (TmUnit _) = "tt"
+showTermLight (TmLet _ x tm1 tm2) =
+  "let " ++ show x ++ " = " ++ showTermLight tm1 ++ " in " ++
+  showTermLight tm2
+showTermLight (TmVariant _ x tms) =
+  show x ++ "(" ++ intercalate ", " (showTermLight <$> tms) ++ ")"
+showTermLight (TmMatch _ discrim cases) =
+  "match " ++ showTermLight discrim ++ " with | " ++
+  (intercalate " | " (show <$> (bimap show showTermLight <$> cases)))
+showTermLight (TmRecord _ fields) =
+  "{" ++ intercalate ", " (show <$> (bimap show showTermLight <$> fields)) ++ "}"
+showTermLight (TmPlaceholder _ classNm methodNm ty) =
+  "PLACEHOLDER: " ++ show classNm ++ ", " ++ show methodNm ++ ", " ++ show ty
 
 -- instance Show α => Show (Term α) where
 --   show (TmVar fi x)         = "(TmVar " ++ show fi ++ " " ++ show x ++ ")"
@@ -938,24 +1001,63 @@ instance Show (Term α) where
 --   show (TmPlaceholder fi classNm methodNm ty) =
 --     "(TmPlaceholder " ++ show fi ++ " " ++ show classNm ++ " " ++ show methodNm ++ " "
 --     ++ show ty ++ ")"
-        
+
 instance Show α => Show (Command α) where
-  show (CDecl _ s t) = "(CDecl " ++ show s ++ " " ++ show t ++ ")"
-  show (CLet _ s t)  = "(CLet " ++ show s ++ " " ++ show t ++ ")"
-  show (CEval _ t)   = "(CEval " ++ show t ++ ")"
-  show (CCheck _ t)  = "(CCheck " ++ show t ++ ")"
-  show (CAssert _ t) = "(CAssert " ++ show t ++ ")"
-  show (CData _ x tyvars constrs) =
+  -- show = showCommand
+  show = showCommandLight
+
+-- instance Show α => Show (Command α) where
+--   show (CDecl _ s t) = "(CDecl " ++ show s ++ " " ++ show t ++ ")"
+--   show (CLet _ s t)  = "(CLet " ++ show s ++ " " ++ show t ++ ")"
+--   show (CEval _ t)   = "(CEval " ++ show t ++ ")"
+--   show (CCheck _ t)  = "(CCheck " ++ show t ++ ")"
+--   show (CAssert _ t) = "(CAssert " ++ show t ++ ")"
+--   show (CData _ x tyvars constrs) =
+--     "(CData " ++ show x ++ " " ++ show tyvars ++ " " ++ show constrs ++ ")"
+--   show (CRecord _ x _ _) = "(CRecord " ++ show x ++ ")"
+--   show (CClass _ constrs nm tyvar methods) =
+--     "(CClass (" ++ intercalate " " (show <$> constrs) ++ ") " ++
+--     show nm ++ " " ++ show tyvar ++ " (" ++
+--     intercalate "" (show <$> methods) ++ "))"
+--   show (CInstance _ constrs nm ty methods) =
+--     "(CInstance (" ++ intercalate " " (show <$> constrs) ++ ") " ++
+--     show nm ++ " " ++ show ty ++ " (" ++
+--     intercalate "" (show <$> methods) ++ "))"
+
+showCommand :: Command α -> String
+showCommand (CDecl _ s t) = "(CDecl " ++ show s ++ " " ++ show t ++ ")"
+showCommand (CLet _ s t)  = "(CLet " ++ show s ++ " " ++ show t ++ ")"
+showCommand (CEval _ t)   = "(CEval " ++ show t ++ ")"
+showCommand (CCheck _ t)  = "(CCheck " ++ show t ++ ")"
+showCommand (CAssert _ t) = "(CAssert " ++ show t ++ ")"
+showCommand (CData _ x tyvars constrs) =
     "(CData " ++ show x ++ " " ++ show tyvars ++ " " ++ show constrs ++ ")"
-  show (CRecord _ x _ _) = "(CRecord " ++ show x ++ ")"
-  show (CClass _ constrs nm tyvar methods) =
+showCommand (CRecord _ x _ _) = "(CRecord " ++ show x ++ ")"
+showCommand (CClass _ constrs nm tyvar methods) =
     "(CClass (" ++ intercalate " " (show <$> constrs) ++ ") " ++
     show nm ++ " " ++ show tyvar ++ " (" ++
     intercalate "" (show <$> methods) ++ "))"
-  show (CInstance _ constrs nm ty methods) =
+showCommand (CInstance _ constrs nm ty methods) =
     "(CInstance (" ++ intercalate " " (show <$> constrs) ++ ") " ++
     show nm ++ " " ++ show ty ++ " (" ++
     intercalate "" (show <$> methods) ++ "))"
+
+showCommandLight :: Command α -> String
+showCommandLight (CDecl _ s t) = "pure  " ++ show s ++ " : " ++ show t
+showCommandLight (CLet _ s t)  = "def " ++ show s ++ " = " ++ show t
+showCommandLight (CEval _ t)   = "run " ++ show t
+showCommandLight (CCheck _ t)  = "check " ++ show t
+showCommandLight (CAssert _ t) = "assert " ++ show t
+showCommandLight (CData _ x tyvars constrs) =
+    "data " ++ show x ++ " " ++ intercalate " " (show <$> tyvars) ++
+    " | " ++ intercalate " | " (show <$> constrs)
+showCommandLight (CRecord _ x _ _) = "{ " ++ show x ++ " }"
+showCommandLight (CClass _ constrs nm tyvar methods) =
+  "class " ++ show nm
+showCommandLight (CInstance _ constrs nm ty methods) =
+  "instance " ++ intercalate " " (show <$> constrs) ++ " => " ++
+  show nm ++ " " ++ show ty ++ " | " ++
+  intercalate " | " (show <$> methods)
 
   
 instance Show α => Show (Prog α) where
@@ -1160,10 +1262,10 @@ tysubstAll b tsubst x =
   foldl (\acc (s, t) -> tysubst b s t acc) x tsubst
 
 tysubstAll' :: TySubstable a => TypeSubst -> a -> a
-tysubstAll' tsubst x =
-  foldl (\acc (s, t) -> tysubst' s t acc) x tsubst
+-- tysubstAll' tsubst x =
+  -- foldl (\acc (s, t) -> tysubst' s t acc) x tsubst
+tysubstAll' = tysubstAll True
 
--- tysubstAllTerm :: 
 
 -------------------------
 -- | Free type variables
@@ -1262,6 +1364,12 @@ compatible
   nm1 == nm2 && length tyargs1 == length tyargs2 &&
   (and $ uncurry compatible <$> zip tyargs1 tyargs2)
 compatible _ _ = False
+
+
+-- Check if type s is contained within type t (up to Eq of types).
+containsType :: Type -> Type -> Bool
+containsType s = (.) getAny $ typeRec2 $
+  \ty -> Any $ s == ty
 
 -------------------------------------------
 -- | Helpers for building common AST terms.

@@ -11,12 +11,12 @@ data Sum a b =
   | Inr b
 
 pure proj1 : a × b → a
-def proj1 = λ p.
+def proj1 = λp.
   destruct p as
   | (x, _) → x
 
 pure proj2 : a × b → b
-def proj2 = λ p.
+def proj2 = λp.
   destruct p as
   | (_, y) → y
 
@@ -25,31 +25,31 @@ data List a =
   | Cons a (List a)
 
 pure isnil : [a] → Bool
-def isnil = λ l.
+def isnil = λl.
   destruct l as
   | Nil → ⊤
   | _   → ⊥
 
 pure head : [a] → a?
-def head = λ l.
+def head = λl.
   destruct l as
   | Nil      → None
   | Cons x _ → Some x
 
 pure tail : [a] → [a]
-def tail = λ l.
+def tail = λl.
   destruct l as 
   | Nil       → Nil
   | Cons _ l' → l'
 
 pure app : [a] → [a] → [a]
-def app = λ l1. λ l2.
+def app = λl1. λl2.
   destruct l1 as 
   | Nil → l2
   | Cons x l1' → Cons x (app l1' l2)
 
 pure concat : [[a]] → [a]
-def concat = λ l.
+def concat = λl.
   destruct l as
   | Nil → Nil
   | Cons x l' → app x (concat l')
@@ -61,13 +61,25 @@ def length = λl.
   | Cons _ l' → 1 + length l'
 
 pure rev : [a] → [a]
-def rev = λ l.
+def rev = λl.
   destruct l as
   | Nil → Nil
   | Cons x l' → app (rev l') (Cons x Nil)
 
 pure map : (a → b) → [a] → [b]
-def map = λ f. λ l.
+def map = λf. λl.
   destruct l as
   | Nil → Nil
   | Cons x l' → Cons (f x) (map f l')
+
+
+# The identity function
+pure id : a → a
+def id = λx. x
+
+# Function composition.
+pure compose : (a → b) → (b → c) → a → c
+def compose = λf. λg. λx. g (f x)
+
+pure flip : (a → b → c) → b → a → c
+def flip = λf. λx. λy. f y x

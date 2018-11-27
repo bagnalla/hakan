@@ -352,14 +352,15 @@ unfold fi η (TyApp ty s) =
           tycon { tycon_kinds = kinds ++ [KStar]
                 , tycon_tyargs = tyargs ++ [s]
                 , tycon_instantiated = unfold fi η $ TyApp t s }
-    TyVar _ _ x ->
+    -- TyVar _ _ _ ->
+    _ -> 
       TyApp ty $ unfold fi η s
-    _ -> -- TODO: we may need to allow type variables here as well
-         -- since we sometimes have variables in the place of type
-         -- constructors.
-      error $ "unfold: expected type abstraction or type constructor on \
-              \left side of application.\ninstead found: " ++
-      show (unfold fi η ty)
+    -- _ -> -- TODO: we may need to allow type variables here as well
+    --      -- since we sometimes have variables in the place of type
+    --      -- constructors.
+    --   error $ "unfold: expected type abstraction or type constructor on \
+    --           \left side of application.\ninstead found: " ++
+    --   show (unfold fi η ty)
 unfold fi η (TyConstructor tycon) =
   TyConstructor $ mapTypeConstructor (unfold fi η) tycon
 unfold _ _ ty = ty

@@ -6,7 +6,7 @@
 module Core (
   genTypeVars, idOfType, isTyVar, fixTy, kindCheck, ctxOfType, isRigid,
   isArrowType, pairOfType, isTyRef, tyOfRefType, isVariantTy, isRecordTy,
-  tyargsOfTy, isTyConstructor, isTyApp
+  tyargsOfTy, isTyConstructor, isTyApp, constraintOfPlaceholder
   ) where
 
 import Control.Monad.State
@@ -31,6 +31,7 @@ kindCheck (TyApp s t) = do
   case s' of
     KArrow s'' t'' -> if s'' == t' then return t'' else Nothing
     _ -> Nothing
+kindCheck (TyConstructor (TypeConstructor {})) = undefined -- TODO
 kindCheck _ = Just KStar
 
 
@@ -102,6 +103,11 @@ intOfTerm _ = error "intOfTerm: expected integer term"
 charOfTerm :: Term α -> Char
 charOfTerm (TmChar _ c) = c
 charOfTerm _ = error "charOfTerm: expected char term"
+
+constraintOfPlaceholder :: Term α -> (Type, ClassNm)
+constraintOfPlaceholder (TmPlaceholder _ classNm _ x) = (x, classNm)
+constraintOfPlaceholder _ =
+  error "constraintOfPlaceholder: expected TmPlaceholder"
 
 idOfType :: Type -> Id
 idOfType (TyVar _ _ x) = x
