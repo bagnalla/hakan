@@ -1,0 +1,110 @@
+
+# The identity function
+pure id : a → a
+def id = λx. x
+
+pure flip : (a → b → c) → b → a → c
+def flip = λf. λx. λy. f y x
+
+# Function composition.
+pure compose : (b → c) → (a → b) → a → c
+def compose = λf. λg. λx. f (g x)
+
+pure postcompose : (a → b) → (b → c) → a → c
+def postcompose = flip compose
+
+data Pair a b =
+  | Pair a b
+
+pure proj1 : a × b → a
+def proj1 = λp.
+  destruct p as
+  | (x, _) → x
+
+pure proj2 : a × b → b
+def proj2 = λp.
+  destruct p as
+  | (_, y) → y
+
+class f ∈ Functor
+  | fmap : (a → b) → f a → f b
+
+class f ∈ Bifunctor
+  | bimap : (a → c) → (b → d) → f a b → f c d
+
+class f ∈ Profunctor
+  | dimap : (c → a) → (b → d) → f a b → f c d
+
+# The Monad class (with Functor as a superclass).
+class m ∈ Functor ⇒ m ∈ Monad
+  | return : a → m a
+  | bind : m a → (a → m b) → m b
+
+instance Pair ∈ Bifunctor
+  | bimap = λf. λg. λp.
+    destruct p as
+    | (x, y) → (f x, g y)
+
+instance f ∈ Bifunctor ⇒ f a ∈ Functor
+  | fmap = bimap id
+
+pure first : f ∈ Bifunctor ⇒ (a → c) → f a b → f c b
+def first = flip bimap id
+
+pure second : f ∈ Bifunctor ⇒ (b → c) → f a b → f a c
+def second = bimap id
+
+data StateT s m a =
+  | StateT (s → m (a × s))
+
+data Identity a =
+  | Identity a
+
+pure runIdentity : Identity a → a
+def runIdentity = λx. destruct x as | Identity y → y
+
+pure runStateT : StateT s m a → s → m (a × s)
+def runStateT = λm. λs. destruct m as | StateT f → f s
+
+pure runState : StateT s Identity a → s → (a × s)
+def runState = (compose runIdentity) ∘ runStateT
+
+instance m ∈ Functor ⇒ StateT s m ∈ Functor
+  | fmap = λf. λa. StateT (λs. fmap (first f) (runStateT a s))
+
+instance Identity ∈ Functor
+  | fmap = λf. Identity ∘ f ∘ runIdentity
+
+instance m ∈ Monad ⇒ StateT s m ∈ Monad
+  | return = λa. StateT (λs. return (a, s))
+  | bind = λm. λk.
+             StateT (λs. bind (runStateT m s)
+                    (λp. destruct p as
+                         | (a, s') → runStateT (k a) s'))
+
+instance Identity ∈ Monad
+  | return = Identity
+  | bind = λx. λf. runIdentity (fmap f x)
+
+pure comp : StateT Int Identity Int
+-- def comp = StateT (λx. Identity (0, x)
+-- def comp = StateT (λs. return (0, s))
+def comp = return 0
+
+pure get : StateT Int Identity Int
+def get = StateT (λs. return (s, s))
+
+run runState (fmap (λx. x + 1) comp) 123
+# ==> (1, 123)
+
+-- run second (λx. 2 * x) (runState (fmap (λx. x + 1) get) 123)
+-- # ==> (124, 246)
+
+
+-- -- pure f : a×b → a×b
+-- def f = first id
+
+-- -- run first
+
+-- run first id (0, 0)
+-- -- run f (0, 0)

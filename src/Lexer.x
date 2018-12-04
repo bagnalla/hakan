@@ -30,6 +30,7 @@ tokens :-
   "->"                          { lex' TokenArrow }
   \→                            { lex' TokenArrow }
   "=>"                          { lex' TokenFatArrow }
+  ⇒                            { lex' TokenFatArrow }
   "."                           { lex' TokenDot }
   ","                           { lex' TokenComma }
   Bool                          { lex' TokenBoolTy }
@@ -67,8 +68,10 @@ tokens :-
   def                           { lex' TokenDef }
 --  val                           { lex' TokenVal }
   in                            { lex' TokenIn }
+  is                            { lex' TokenIs }
+  \∈                           { lex' TokenIs }
   ":="                          { lex' TokenUpdate }
-  \←                            { lex' TokenUpdate }
+  \←                           { lex' TokenUpdate }
   "!"                           { lex' TokenBang }
   $digit+                       { lex (TokenInt . read) }
   \=                            { lex' TokenEq }
@@ -83,9 +86,9 @@ tokens :-
   \⊗                            { lex' TokenOTimes }
   \/                            { lex' TokenDiv }
   "&&"                          { lex' TokenAnd }
-  \∧                            { lex' TokenAnd }
+  \∧                           { lex' TokenAnd }
   "||"                          { lex' TokenOr }
-  \∨                            { lex' TokenOr }
+  \∨                           { lex' TokenOr }
   \~                            { lex' TokenNot }
   \¬                            { lex' TokenNot }
   \<                            { lex' TokenLt }
@@ -205,6 +208,7 @@ data TokenClass =
 --  | TokenLetrec
 --  | TokenVal
   | TokenIn
+  | TokenIs
   | TokenCompose
   | TokenLLBracket
   | TokenRRBracket
@@ -300,6 +304,7 @@ unLex TokenDef             = "def"
 --unLex TokenLetrec          = "letrec"
 --unLex TokenVal             = "val"
 unLex TokenIn              = "in"
+unLex TokenIs              = "is"
 unLex TokenCompose         = "∘"
 unLex TokenLLBracket       = "〚"
 unLex TokenRRBracket       = "〛"

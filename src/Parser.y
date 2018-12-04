@@ -29,7 +29,7 @@ import Ast (data_of_term)
   int          { Token $$ TokenIntTy }
   char         { Token $$ TokenCharTy }
   unit         { Token $$ TokenUnitTy }
-  refty        { Token $$ TokenRefTy }
+--  refty        { Token $$ TokenRefTy }
   tt           { Token $$ TokenTT }
   true         { Token $$ (TokenBool True) }
   false        { Token $$ (TokenBool False) }
@@ -51,12 +51,14 @@ import Ast (data_of_term)
   inr          { Token $$ TokenInr }
   case         { Token $$ TokenCase }
   of           { Token $$ TokenOf }
-  ref          { Token $$ TokenRef }
+--  ref          { Token $$ TokenRef }
   let          { Token $$ TokenLet }
   def          { Token $$ TokenDef }
 --  letrec       { Token $$ TokenLetrec }
 --  val          { Token $$ TokenVal }
   in           { Token $$ TokenIn }
+  is           { Token $$ TokenIs }
+  "∈"         { Token $$ TokenIs }
   '!'          { Token $$ TokenBang }
   ":="         { Token $$ TokenUpdate }
   ','          { Token $$ TokenComma }
@@ -116,6 +118,7 @@ import Ast (data_of_term)
 %nonassoc in
 %right ';'
 %left else
+%nonassoc fatarrow
 %nonassoc ":="
 %nonassoc '=' "<>" '<' '>' "<=" ">="
 %left "||"
@@ -125,6 +128,7 @@ import Ast (data_of_term)
 %left '∘'
 %left '▵' '▿'
 %nonassoc fix true false intVal id unit bool int char refty
+%nonassoc is
 %left APP
 %nonassoc UNOP
 %nonassoc '-'
@@ -146,7 +150,7 @@ AType :
   | int { Ast.TyInt }
   | char { Ast.TyChar }
   | '(' Type ')' { $2 }
-  | id { Ast.TyVar False [] $ idFromToken $1 } -- TODO
+  | id { Ast.mkTyVar $ idFromToken $1 } -- TODO
   | capid { Ast.TyName (idFromToken $1) }
   | '[' Type ']'
     { Ast.TyApp (Ast.TyName $ Id "List") $2 }
@@ -163,7 +167,8 @@ Type :
   | Type '+' Type
     { Ast.TyApp (Ast.TyApp (Ast.TyName $ Id "Sum") $1) $3 }
   | Type '?' { Ast.TyApp (Ast.TyName $ Id "Option") $1 }
-  | refty Type { Ast.TyRef $2 }
+--  | refty Type { Ast.TyRef $2 }
+
 
 Id :
   '_' { Token $1 (TokenId (Id "_")) }
@@ -178,15 +183,15 @@ Term :
 			 Just ty -> ty) $5 }
   | '-' Term %prec UNOP { Ast.TmUnop $1 Ast.UMinus $2 }
   | '~' Term %prec UNOP { Ast.TmUnop $1 Ast.UNot $2 }
-  | ref Term %prec UNOP { Ast.TmUnop $1 Ast.URef $2 }
-  | '!' Term %prec UNOP { Ast.TmUnop $1 Ast.UDeref $2 }
+--  | ref Term %prec UNOP { Ast.TmUnop $1 Ast.URef $2 }
+--  | '!' Term %prec UNOP { Ast.TmUnop $1 Ast.UDeref $2 }
   | Term '+' Term { Ast.TmBinop $2 Ast.BPlus $1 $3 }
   | Term '-' Term { Ast.TmBinop $2 Ast.BMinus $1 $3 }
   | Term '*' Term { Ast.TmBinop $2 Ast.BMult $1 $3 }
   | Term '/' Term { Ast.TmBinop $2 Ast.BDiv $1 $3 }
   | Term '<' Term { Ast.TmBinop $2 Ast.BLt $1 $3 }
   | BExp { $1 }
-  | Term ":=" Term { Ast.TmBinop $2 Ast.BUpdate $1 $3 }
+--  | Term ":=" Term { Ast.TmBinop $2 Ast.BUpdate $1 $3 }
   | Term '∘' Term
     { Ast.TmApp $2 (Ast.TmApp $2  (Ast.TmVar $2 (Id "compose")) $1) $3 }
   | Term ';' Term { Ast.TmApp $2 (Ast.TmAbs $2 (Id "_") Ast.TyUnit $3) $1 }
@@ -285,11 +290,13 @@ Command :
   | evaluate Term { Ast.CEval $1 $2 }
   | '〚' Term '〛' { Ast.CEval $1 $2 }
   | data ClassConstraints fatarrow capid list(id) '=' barlist(Ctor)
+--  | data Type fatarrow capid list(id) '=' barlist(Ctor)
       { Ast.propagateClassConstraintsCom $2 $
           Ast.CData $1 (idFromToken $4) (map idFromToken $5) $7 }
   | data capid list(id) '=' barlist(Ctor)
       { Ast.CData $1 (idFromToken $2) (map idFromToken $3) $5 }
   | record ClassConstraints fatarrow capid list(id) '=' '{'
+--  | record Type fatarrow capid list(id) '=' '{'
     seplist(FieldDecl, ',') '}'
       { Ast.propagateClassConstraintsCom $2 $
           Ast.CRecord $1 (idFromToken $4) (map idFromToken $5) $8 }
@@ -303,10 +310,15 @@ Command :
 --  | class capid id where barlist(FieldDecl)
 --      { Ast.CClass $1 [] (Ast.ClassNm $ idFromToken $2) (idFromToken $3) $5 }
 
-  | class ClassConstraints fatarrow capid id barlist(FieldDecl)
-      { Ast.CClass $1 (map snd $2) (Ast.ClassNm $ idFromToken $4) (idFromToken $5) $6 }
-  | class capid id barlist(FieldDecl)
-      { Ast.CClass $1 [] (Ast.ClassNm $ idFromToken $2) (idFromToken $3) $4 }
+--  | class ClassConstraints fatarrow capid id barlist(FieldDecl)
+--      { Ast.CClass $1 (map snd $2) (Ast.ClassNm $ idFromToken $4) (idFromToken $5) $6 }
+--  | class capid id barlist(FieldDecl)
+--      { Ast.CClass $1 [] (Ast.ClassNm $ idFromToken $2) (idFromToken $3) $4 }
+
+  | class ClassConstraints fatarrow id is capid barlist(FieldDecl)
+      { Ast.CClass $1 (map snd $2) (Ast.ClassNm $ idFromToken $6) (idFromToken $4) $7 }
+  | class id is capid barlist(FieldDecl)
+      { Ast.CClass $1 [] (Ast.ClassNm $ idFromToken $4) (idFromToken $2) $5 }
 
 --  | instance ClassConstraints fatarrow capid Type
 --    where barlist(InstanceMethod)
@@ -314,16 +326,20 @@ Command :
 --  | instance capid Type where barlist(InstanceMethod)
 --      { Ast.CInstance $1 [] (Ast.ClassNm $ idFromToken $2) $3 $5 }
 
-  | instance ClassConstraints fatarrow capid Type barlist(InstanceMethod)
-      { Ast.CInstance $1 $2 (Ast.ClassNm $ idFromToken $4) $5 $6 }
-  | instance capid Type barlist(InstanceMethod)
-      { Ast.CInstance $1 [] (Ast.ClassNm $ idFromToken $2) $3 $4 }
+--  | instance ClassConstraints fatarrow capid Type barlist(InstanceMethod)
+--      { Ast.CInstance $1 $2 (Ast.ClassNm $ idFromToken $4) $5 $6 }
+  | instance ClassConstraints fatarrow Type is capid barlist(InstanceMethod)
+      { Ast.CInstance $1 $2 (Ast.ClassNm $ idFromToken $6) $4 $7 }
+--  | instance capid Type barlist(InstanceMethod)
+  | instance Type is capid barlist(InstanceMethod)
+      { Ast.CInstance $1 [] (Ast.ClassNm $ idFromToken $4) $2 $5 }
 
 FieldDecl :
   id TyBinder { (idFromToken $1, $2) }
 
 ClassConstraint :
-  capid id { (idFromToken $2, Ast.ClassNm (idFromToken $1)) }
+--  capid id { (idFromToken $2, Ast.ClassNm (idFromToken $1)) }
+  id is capid { (idFromToken $1, Ast.ClassNm (idFromToken $3)) }
 
 ClassConstraints :
   ClassConstraint { [$1] }
@@ -335,11 +351,11 @@ TyBinder :
 TyDeclBinder :
   -- Propagate class constraints to type variables. Doesnt avoid capture.
   -- Assumes there are no type abstractions.
---  ':' ClassConstraints fatarrow Type
---    { Ast.propagateClassConstraints $2 $4 }
+  ':' ClassConstraints fatarrow Type
+    { Ast.propagateClassConstraints $2 $4 }
 -- TODO: fix this so that we can have class constraints without a conflict
 -- with type application syntax :(
-  ':' Type { $2 }
+  | ':' Type { $2 }
 
 Binder :
   '=' Term { $2 }

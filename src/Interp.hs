@@ -24,7 +24,7 @@ initState = (0, initEnv)
 -- print at the end.
 interpProg :: Prog α -> (Value, [String])
 interpProg =
-  debugPrint "interpProg" $
+  debugPrint "\ninterpProg" $
   runIdentity . flip evalStateT initState . flip runReaderT initEnv .
   runWriterT . interpCommands . prog_of . eraseData
 

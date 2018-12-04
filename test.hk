@@ -1,28 +1,41 @@
-val proj1 : a × b → a
-let proj1 = λp. p₁
 
-val f : ℤ → ℤ
-let f = λx. x + 5
+pure id : a → a
+def id = λx. x
 
-val g : ℤ → ℤ
-let g = λx. x * 2
+pure flip : (a → b → c) → b → a → c
+def flip = λf. λx. λy. f y x
 
-val x : ℤ × ℤ
-let x = (1, 2)
+class f ∈ Bifunctor
+  | bimap : (a → c) → (b → d) → f a b → f c d
 
-val compose : (a → b) → (b → c) → a → c
-let compose = λf. λg. λx. g (f x)
+pure first : f ∈ Bifunctor => (a -> c) -> f a b -> f c b
+def first = flip bimap id
 
-# val asdf : a × b → a
-# let asdf = λp. π₁ p
+data Pair a b =
+  | Pair a b
 
-# 〚 compose π₁ (compose f g) 〛
-# 〚 compose π₁ f 〛
+instance Pair ∈ Bifunctor
+  | bimap = λf. λg. λp.
+    destruct p as
+    | (x, y) → (f x, g y)
 
-〚 let comp = λf. λg. λx. g (f x) in comp π₁ (comp f g) 〛
-# 〚 let comp = λf. λg. λx. g (f x) in comp π₁ (\f. \g. \x. g (f x)) 〛
-# 〚 let comp = λf. λg. λx. g (f x) in comp π₁ f 〛
-# 〚 let comp = (λf. λg. λx. g (f x)) in comp 〛
-# 〚 λf. λg. λx. g (f x) 〛
 
-# 〚 λf. λg. λx. g (f x)〛
+-- pure f : (a -> c) -> a × b -> c × b
+def f = bimap id
+
+-- def first = λf. λp. destruct p as
+--                     | (x, y) -> (f x, y)
+
+
+-- pure g : a -> Int × Int
+-- def g = λx. first id (0, 0)
+
+-- run bimap id id (0, 0)
+run f id (0, 0)
+
+
+
+-- run first id (0, 0)
+-- run f id (0, 0)
+
+-- run first id (first id (0, 0), ⊥)

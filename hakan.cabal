@@ -16,7 +16,7 @@ cabal-version:       >=1.10
 library
   hs-source-dirs:      src
   exposed-modules:     Symtab Ast Core Lexer Parser Tycheck Eval Interp
-                       Preprocessor Gensym Util Context Unify
+                       Preprocessor Gensym Util Context Unify Kind
   build-depends:       base >= 4.7 && < 5
                      , containers
                      , mtl

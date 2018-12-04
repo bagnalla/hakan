@@ -30,8 +30,8 @@ logConstrSet :: ConstrSet -> String
 logConstrSet cs =
   intercalate "\n"
   ((\(x, y) ->
-      "(" ++ showTypeLight x ++ ",\n  " ++ showTypeLight y ++ ")") <$> cs)
-       -- "(" ++ show x ++ ",\n  " ++ show y ++ ")") <$> cs)
+      -- "(" ++ showTypeLight x ++ ",\n  " ++ showTypeLight y ++ ")") <$> cs)
+       "(" ++ show x ++ ",\n  " ++ show y ++ ")") <$> cs)
 
 
 type UnifyLog = [((Type, Type), ConstrSet)]
@@ -39,10 +39,10 @@ type UnifyLog = [((Type, Type), ConstrSet)]
 printUnifyLog :: UnifyLog -> String
 printUnifyLog l =
   intercalate "\n" $ (\((s, t), constrs) ->
-                        "\nsubstituting\n  " ++ showTypeLight s ++ "\nfor\n  "
-                        ++ showTypeLight t ++ "\nremaining constraints:\n"
-                         -- "\nsubstituting\n  " ++ show s ++ "\nfor\n  "
-                         -- ++ show t ++ "\nremaining constraints:\n"
+                        -- "\nsubstituting\n  " ++ showTypeLight s ++ "\nfor\n  "
+                        -- ++ showTypeLight t ++ "\nremaining constraints:\n"
+                         "\nsubstituting\n  " ++ show s ++ "\nfor\n  "
+                         ++ show t ++ "\nremaining constraints:\n"
                          ++ logConstrSet constrs) <$> l
 
 
@@ -80,8 +80,8 @@ unify fi η ψ ((s', t') : xs) =
     --   unify fi η ψ xs
     -- else
     --   Left (s, t, "Class constraints don't match")
-    let (TyVar b ctx x) = t
-    let t'' = TyVar b (ctx `union` ctxOfType s) x
+    let (TyVar b k ctx x) = t
+    let t'' = TyVar b k (ctx `union` ctxOfType s) x
     let xs' = tysubst' t'' s xs
     tell [((t'', s), xs')]
     rest <- unify fi η ψ xs'
@@ -95,7 +95,7 @@ unify fi η ψ ((s', t') : xs) =
           (not $ s `elem` freetyvars t) then
     do
       case t of
-        TyVar b ctx x -> do
+        TyVar b k ctx x -> do
           -- If t is rigid, then instead of taking the set union of
           -- class constraints we just check that the constraints of s
           -- is a subset of the constraints of t.
@@ -109,7 +109,7 @@ unify fi η ψ ((s', t') : xs) =
               return $ Left (s, t, "Class constraints of " ++ show s ++
                               " are not a subset of those of " ++ show t)
             else do
-            let t'' = TyVar b (ctx `union` ctxOfType s) x
+            let t'' = TyVar b k (ctx `union` ctxOfType s) x
             let xs' = tysubst' t'' s xs
             tell [((t'', s), xs')]
             rest <- unify fi η ψ xs'
@@ -168,7 +168,8 @@ unify fi η ψ ((s', t') : xs) =
       unify fi η ψ $ zip s'' t'' ++ xs
   else if isTyApp s && isTyApp t then
     case (s, t) of
-      (TyApp s1@(TyVar _ _ x) s2, TyApp t1@(TyVar _ _ y) t2) ->
+      -- (TyApp s1@(TyVar _ _ _ x) s2, TyApp t1@(TyVar _ _ _ y) t2) ->
+      (TyApp s1 s2, TyApp t1 t2) ->
         unify fi η ψ $ [(s1, t1), (s2, t2)] ++ xs
       _ -> return $ Left (s, t, "Incompatible types")
 
@@ -227,9 +228,9 @@ resolveInstance ψ ty classNm =
     Nothing -> Left classNm
   where
     go :: Type -> Type -> Maybe [(Id, ClassNm)]
-    go (TyVar _ ctx1 x) (TyVar _ ctx2 y) =
+    go (TyVar _ _ ctx1 x) (TyVar _ _ ctx2 y) =
       return $ zip (repeat x) (nub $ ctx1 ++ ctx2)
-    go s (TyVar _ ctx2 _) =
+    go s (TyVar _ _ ctx2 _) =
       -- If the discriminee is not a type variable and the instance
       -- pattern type is, we must find instances of all of the
       -- variable's classes for the discriminee.

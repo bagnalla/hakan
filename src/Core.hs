@@ -15,24 +15,17 @@ import qualified Data.Traversable as T
 
 import Ast
 import Gensym (nextSym)
+import Kind (kindCheck)
 import Symtab (Id(..), Symtab, map, get)
 import Util (debugPrint, mapSnd, isPermutationOf)
 
 
---------------------------
--- | Well-kindedness check
-
--- Assume type variables have kind *.
-kindCheck :: Type -> Maybe Kind
-kindCheck (TyAbs _ k s) = KArrow k <$> (kindCheck s)
-kindCheck (TyApp s t) = do
-  s' <- kindCheck s
-  t' <- kindCheck t
-  case s' of
-    KArrow s'' t'' -> if s'' == t' then return t'' else Nothing
-    _ -> Nothing
-kindCheck (TyConstructor (TypeConstructor {})) = undefined -- TODO
-kindCheck _ = Just KStar
+-- -- The typechecker monad.
+-- type TycheckM a =
+--   WriterT [String]
+--   (ReaderT Context
+--    (ExceptT String
+--     (StateT Int Identity))) a
 
 
 ---------------------------------------------------------------
@@ -46,7 +39,7 @@ class GenTyVars a where
 instance GenTyVars Type where
   gentyvars = typeRecM $
     \ty -> case ty of
-      TyVar b ctx (Id "") -> TyVar b ctx . Id <$> nextSym "?X_"
+      TyVar b k ctx (Id "") -> TyVar b k ctx . Id <$> nextSym "?X_"
       _ -> return ty
   
 -- Generate fresh type variables for a single term (including its
@@ -110,7 +103,7 @@ constraintOfPlaceholder _ =
   error "constraintOfPlaceholder: expected TmPlaceholder"
 
 idOfType :: Type -> Id
-idOfType (TyVar _ _ x) = x
+idOfType (TyVar _ _ _ x) = x
 idOfType (TyVariant x _ _) = x
 idOfType (TyRecord x _ _) = x
 idOfType (TyConstructor (TypeConstructor { tycon_name = nm })) = nm
@@ -118,11 +111,11 @@ idOfType _ =
   error "idOfType: expected variable, variant, record, or type constructor"
 
 ctxOfType :: Type -> [ClassNm]
-ctxOfType (TyVar _ ctx _) = ctx
+ctxOfType (TyVar _ _ ctx _) = ctx
 ctxOfType _ = error "ctxOfType: expected type variable"
 
 isTyVar :: Type -> Bool
-isTyVar (TyVar _ _ _) = True
+isTyVar (TyVar _ _ _ _) = True
 isTyVar _         = False
 
 isArrowType :: Type -> Bool
@@ -150,7 +143,7 @@ isTyApp (TyApp _ _) = True
 isTyApp _ = False
 
 isRigid :: Type -> Bool
-isRigid (TyVar True _ _) = True
+isRigid (TyVar True _ _ _) = True
 isRigid _ = False
 
 pairOfType :: Type -> (Type, Type)

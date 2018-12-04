@@ -179,7 +179,7 @@ instance Functor Identity
 
 
 pure comp : StateT Int Identity Int
-def comp = StateT (λx. Identity (x, 0))
+def comp = StateT (λx. Identity (0, x))
 
 -- -- def asdf = fmap (λx. x + 1) (runState m 123)
 
@@ -197,5 +197,6 @@ def comp = StateT (λx. Identity (x, 0))
 -- --   | StateT g -> g 0
 
 -- -- run π₂ (runIdentity (runStateT (fmap (λx. x + 1) comp) 0))
-run π₂ (runState (fmap (λx. x + 1) comp) 0)
--- # ==> (123, 1)
+-- run π₂ (runState (fmap (λx. x + 1) comp) 0)
+run runState (fmap (λx. x + 1) comp) 123
+-- # ==>

@@ -3,7 +3,7 @@
 
 module Symtab (
   Id(..), Symtab, empty, add, get, exists, keys, fold, Symtab.map, mapi,
-  assocGet, assocSet, assocUpdate, assocIndex
+  assocGet, assocSet, assocUpdate, assocIndex, fromList
   ) where
 
 -- Use Haskell's map data structure
@@ -76,6 +76,9 @@ map = Map.map
 -- Map where the function receives the Id as well as the value
 mapi :: (Id -> a -> b) -> Symtab a -> Symtab b
 mapi = Map.mapWithKey
+
+fromList :: [(Id, a)] -> Symtab a
+fromList = Map.fromList
 
 ----------------------
 -- | Typeclass instances
