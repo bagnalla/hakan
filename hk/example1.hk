@@ -1,0 +1,45 @@
+
+class Functor f where
+  | fmap : (a → b) → f a → f b
+
+data List a =
+  | Nil
+  | Cons a (List a)
+
+pure map : (a → b) → [a] → [b]
+def map = λf. λl.
+  destruct l as
+  | Nil → Nil
+  | Cons x l' → Cons (f x) (map f l')
+
+instance Functor List where
+  | fmap = map
+
+pure l : List Int
+def l = Cons 0 (Cons 1 (Cons 2 Nil))
+
+run fmap (λx. x + 1) l
+
+
+  
+class Functor f
+  | fmap : (a → b) → f a → f b
+
+data List a
+  | Nil
+  | Cons a (List a)
+
+pure map : (a → b) → [a] → [b]
+def map = λf. λl.
+  case l
+  | Nil → Nil
+  | Cons x l' → Cons (f x) (map f l')
+
+instance Functor List
+  | fmap = map
+
+pure l : List Int
+def l = Cons 0 (Cons 1 (Cons 2 Nil))
+
+run fmap (λx. x + 1) l
+# ==> Cons 1 (Cons 2 (Cons 3 Nil))
