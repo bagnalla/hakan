@@ -69,6 +69,9 @@ def runStateT = λm. λs. destruct m as | StateT f → f s
 pure runState : StateT s Identity a → s → (a × s)
 def runState = (compose runIdentity) ∘ runStateT
 
+pure evalState : StateT s Identity a → s → a
+def evalState = (compose π₁) ∘ runState
+
 instance m ∈ Functor ⇒ StateT s m ∈ Functor
   | fmap = λf. λa. StateT (λs. fmap (first f) (runStateT a s))
 
@@ -87,24 +90,45 @@ instance Identity ∈ Monad
   | bind = λx. λf. runIdentity (fmap f x)
 
 pure comp : StateT Int Identity Int
--- def comp = StateT (λx. Identity (0, x)
--- def comp = StateT (λs. return (0, s))
 def comp = return 0
 
-pure get : StateT Int Identity Int
+pure get : StateT a Identity a
 def get = StateT (λs. return (s, s))
+
+pure put : a → StateT a Identity Unit
+def put = λs. StateT (λ_. return (tt, s))
 
 run runState (fmap (λx. x + 1) comp) 123
 # ==> (1, 123)
 
--- run second (λx. 2 * x) (runState (fmap (λx. x + 1) get) 123)
--- # ==> (124, 246)
+run second (λx. 2 * x) (runState (fmap (λx. x + 1) get) 123)
+# ==> (124, 246)
+
+run evalState (get >>=
+               λx. put (x + 1) >>=
+               λ_. get >>=
+               λx. return (2*x))
+  1
+# ==> 4
 
 
--- -- pure f : a×b → a×b
+-- pure f : a×b → a×b
 -- def f = first id
 
--- -- run first
+-- run first
 
 -- run first id (0, 0)
--- -- run f (0, 0)
+-- run f (0, 0)
+
+
+# I think we need multi-parameter typeclasses to do monad transformers
+# properly.
+-- class m ∈ Monad ⇒ m s ∈ MonadState ?
+--   | get : m s
+--   | put : m
+--   | state : m
+
+# Or we could try to support something like this. It would be a bit weird..
+# we would need to allow class constraints on arbitrary types rather than
+# just type variables.
+-- class m s ∈ Monad ⇒ m s ∈ MonadState

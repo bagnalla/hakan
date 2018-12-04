@@ -31,8 +31,6 @@ data Value =
   | VRecord [(Id, Value)]
   deriving Eq
 
--- TODO: fix printing of closure environments in the presence of
--- recursive (infinite) types.
 instance Show Value where
   show VUnit = "VUnit"
   show (VBool b) = "(VBool " ++ show b ++ ")"
@@ -95,22 +93,15 @@ eval (TmAbs _ nm ty tm) = do
   return $ VClos ctx nm tm
 
 eval (TmApp _ t1 t2) = do
-  -- debugPrint "eval TmApp" $ do
   v1 <- eval t1
   v2 <- eval t2
   case v1 of
     VClos clos nm body ->
-      -- debugPrint ("v1: " ++ show v1) $
       -- Force call-by-value order with seq
       seq v2 $ local (const $ extendEnv nm v2 clos) $ eval body
     _ -> do
       env <- ask
-      debugPrint ("env:\n" ++ show env) $
-        debugPrint ("tm1: " ++ show t1) $
-        debugPrint ("v1: " ++ show v1) $
-        debugPrint ("tm2: " ++ show t2) $
-        debugPrint ("v2: " ++ show v2) $
-        evalError $ "eval: " ++ show v1 ++ " isn't a closure"
+      evalError $ "eval: " ++ show v1 ++ " isn't a closure"
 
 eval (TmUnit _) = return VUnit
 eval (TmBool _ b) = return $ VBool b
@@ -209,8 +200,6 @@ eval (TmMatch _ discrim cases) =
         -- If the pattern fails to match, try the next one.
         Nothing -> go cs v
     go [] _ =
-      debugPrint ("discrim: " ++ show discrim) $
-      debugPrint ("cases: " ++ show cases) $
       evalError "eval: failed to match any pattern"
 
 eval tm@(TmPlaceholder _ _ _ _) =

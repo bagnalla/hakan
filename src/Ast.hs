@@ -24,6 +24,8 @@ module Ast (
   ) where
 
 
+-- | The notes below are outdated.
+
 -- I wonder if it's a good idea to treat sequencing specially instead
 -- of just making it a derived form that desugars to
 -- application. Maybe we will just detect the intro/elim pattern of
@@ -104,6 +106,7 @@ module Ast (
 -- class dictionary arguments to their instances might be helpful for
 -- performance.
 
+
 import Control.Monad
 import Control.Monad.Reader
 import Control.Monad.State
@@ -161,8 +164,6 @@ instance Arbitrary ClassNm where
   arbitrary = ClassNm <$> arbitrary
 
 -- TODO: default implementations.
--- I think the type index can just be an Id for class
--- definitions.. but for instances it needs to be a Type.
 data TypeClass =
   TypeClass { tyclass_constrs :: [ClassNm] -- superclass constraints
             , tyclass_name :: ClassNm
@@ -172,57 +173,20 @@ data TypeClass =
   deriving Show
 
 
--- Maybe we just need the dict and not the methods. The dict should
--- just be a tuple? It needs to be a term in the object language.
-
--- To obtain the type of the instance during instance resolution: Use
--- instance_tyname to look up the type and then apply it to the types
--- in instance_tyargs. The result may not necessarily be fully
--- applied, which would be the case when the type index for the class
--- is a type constructor.
-
--- Maybe we should just keep the result of that process around in the
--- record. instance_ty should be the result of doing that. So now
--- during resolution we can just match against instance_ty (any type
--- variables inside should have the constraints attached). So
--- basically the instance resolution algorithm is to try for every
--- known instance of the particular class to match the type we're
--- searching for, doing recursive resolution calls on type variables
--- and their constraints.
 data ClassInstance =
   ClassInstance { -- instance_tyargs :: [Type]
                   instance_ctx :: [(Id, ClassNm)]
                 -- , instance_tyname :: Id
                 , instance_classname :: ClassNm
-                
+
                 -- for matching against during instance resolution
                 , instance_ty :: Type
-
-                -- Gives the order in which the dictionary expects its
-                -- dictionary arguments.
-                -- , instance_args :: [Id]
-
-                -- Gives the order in which the methods appear in the
-                -- dictionary.
-                
-                -- We should probably just reorder them to match the
-                -- class definition...
-                -- , instance_methods :: [Id]
 
                 -- The dictionary, when fully applied, is an n-tuple
                 -- (iterated pairs starting from unit). It may be
                 -- abstracted over other dictionaries though.
                 , instance_dict :: Term () }
   deriving Show
-
-
--- ----------------------
--- -- | Class constraints
-
--- -- Associate a type variable with a class.
--- type ClassConstraint = (Id, TypeClass)
-
--- type ClassContext = [ClassConstraint]
 
 
 ----------
@@ -312,14 +276,6 @@ mkTypeConstructor' :: Id -> [Id] -> [Kind] -> Type -> Type
 mkTypeConstructor' nm tyvars kinds ty =
   mkTypeConstructor nm tyvars kinds [] ty
 
--- -- Wrap a type in a type constructor if it's an abstraction or
--- -- application. Otherwise leave it unchanged.
--- mkTypeConstructorSmart :: Type -> Type
--- mkTypeConstructorSmart (TyAbs x k ty) = undefined
---   -- mkTypeConstructor' x 
--- mkTypeConstructorSmart (TyApp s t) = undefined
--- mkTypeConstructorSmart ty = ty
-
 
 mapTypeConstructor :: (Type -> Type) -> TypeConstructor -> TypeConstructor
 mapTypeConstructor f tycon@(TypeConstructor
@@ -329,6 +285,7 @@ mapTypeConstructor f tycon@(TypeConstructor
   tycon { tycon_tyargs = f <$> tyargs
         , tycon_ty = f uninst
         , tycon_instantiated = f inst }
+
 
 -- Given a type constructor applied to at least one argument, strip
 -- off the last argument.
@@ -340,6 +297,7 @@ chopTypeConstructor (TyConstructor (TypeConstructor { tycon_name = nm
                                                     , tycon_ty = ty })) =
   mkTypeConstructor nm tyvars kinds (removeLast tyargs) (unTyAbs ty)
 chopTypeConstructor _ = error "chopTypeConstructor: expected TyConstructor"
+
 
 applyTypeConstructor :: Type -> Type -> Type
 applyTypeConstructor
@@ -355,6 +313,7 @@ applyTypeConstructor
     error "applyTypeConstructor: type constructor is already fullied applied"
 applyTypeConstructor _ _ =
   error "applyTypeConstructor: expected TyConstructor"
+
 
 -- TODO: should probably ensure that the kinds of the type variables
 -- match.
@@ -486,10 +445,7 @@ typeRec2M f t@(TyConstructor (TypeConstructor { tycon_tyargs = tyargs
 typeRec2M f ty = f ty
 
 
--- Postorder traversal except for TyAbs. NOTE: this skips over the
--- types of constructors of variant types and fields of record types.
--- This is pretty much specifically for implementing freetyvars. The
--- traversal order probably only actually matters in the TyAbs case.
+-- Postorder version of typeRec2M.
 typeRec3M :: (Monoid a, Monad m) => (Type -> m a) -> Type -> m a
 typeRec3M f ty@(TyAbs _ _ s) = pure (<>) <*> typeRec3M f s <*> f ty
 typeRec3M f ty@(TyApp s t) =
@@ -522,6 +478,8 @@ typeRec3M f t@(TyConstructor
 typeRec3M f ty = f ty
 
 
+-- Like typeRecM2 but specifically for a Reader monad, also taking a
+-- function mapping types to context transformers.
 typeRecReader :: (Monoid a, MonadReader r m) => (Type -> r -> r) ->
                  (Type -> m a) -> Type -> m a
 typeRecReader f g ty@(TyAbs _ _ s) =
@@ -798,10 +756,6 @@ commandTypeRecM f (CInstance fi constrs nm ty methods) =
 -- about capture here, since there are no naked abstractions outside
 -- of type constructors during unification and we only ever need to
 -- look at the tyargs of type constructors.
--- NOTE: the pairs are (class name, type variable). I think it's just
--- like this because that's how things are parsed.. but it seems like
--- it should be the other way around (not hard to map swap over the
--- list in the parser).
 propagateClassConstraints :: [(Id, ClassNm)] -> Type -> Type
 propagateClassConstraints =
   flip $ foldl $
@@ -817,13 +771,7 @@ propagateClassConstraints =
 propagateClassConstraintsCom :: [(Id, ClassNm)] -> Command α -> Command α
 propagateClassConstraintsCom constrs =
   commandTypeRec $ propagateClassConstraints constrs
-  -- flip $ foldl $
-  -- \com (x, classNm) ->
-  --   flip commandTypeRec com $
-  --   \ty -> case ty of
-  --            TyVar b ctx y ->
-  --              TyVar b (if x == y then classNm : ctx else ctx) y
-  --            _ -> ty
+
 
 ------------
 -- | Program
@@ -844,7 +792,6 @@ progTypeRec f (Prog { pdata_of = fi, prog_of = coms }) =
 
 eraseData :: Functor f => f α -> f ()
 eraseData = (<$) ()
--- eraseData = void -- not found?
 
 
 ------------------------
@@ -887,8 +834,6 @@ showType nms (TyRecord nm tyargs fields) =
                             "(" ++ show x ++ " : " ++
                             showType (nm : nms) ty ++ ")")
                       fields) ++ "))"
--- showType nms (TyConstructor (TypeConstructor { tycon_name = nm } )) =
---   "(TyConstructor " ++ show nm ++ ")"
 showType _ (TyConstructor tycon) = "(TyConstructor\n" ++ show tycon ++ ")\n"
 
 -- For printing types with less information.
@@ -914,6 +859,7 @@ showTypeLight (TyConstructor
                (TypeConstructor { tycon_name = Id nm,
                                   tycon_tyargs = tyargs })) =
   nm ++ "(" ++ intercalate ", " (showTypeLight <$> tyargs) ++ ")"
+
 
 -- instance Show TypeConstructor where
 --   show (TypeConstructor { tycon_name = nm
@@ -945,23 +891,12 @@ instance Eq Type where
     nm1 == nm2 && tyargs1 == tyargs2
   TyRecord nm1 tyargs1 _ == TyRecord nm2 tyargs2 _ =
     nm1 == nm2 && tyargs1 == tyargs2
-  -- TODO: type constructors
   TyConstructor (TypeConstructor { tycon_name = nm1
                                  , tycon_tyargs = tyargs1 }) ==
     TyConstructor (TypeConstructor { tycon_name = nm2
                                    , tycon_tyargs = tyargs2 }) =
     nm1 == nm2 && tyargs1 == tyargs2
   _ == _ = False
-
-
--- data TypeConstructor =
---   TypeConstructor { tycon_name :: Id
---                   , tycon_tyvars :: [Id]
---                   , tycon_kinds :: [Kind]
---                   , tycon_tyargs :: [Type]
---                   , tycon_ty :: Type
---                   , tycon_instantiated :: Type }
---   deriving (Generic, Show)
 
 
 instance Arbitrary Type where
@@ -976,12 +911,14 @@ instance Arbitrary TypeConstructor where
   arbitrary = genericArbitrary' Z uniform
   shrink _ = []
 
---------------------------------
--- | S-expression show instances
 
 instance Show (Term α) where
   -- show = showTerm
   show = showTermLight
+
+
+--------------------------------
+-- | S-expression show instances
 
 -- instance Show (Term α) where
 --   show (TmVar _ x)         = show x
@@ -1160,26 +1097,6 @@ instance Show α => Show (Prog α) where
 
 ---------
 -- | Misc
-
-
--- data Term α =
---   TmVar α Id
---   | TmAbs α Id Type (Term α)
---   | TmApp α (Term α) (Term α)
---   | TmUnit α
---   | TmBool α Bool
---   | TmInt α Integer
---   | TmChar α Char
---   | TmIf α (Term α) (Term α) (Term α)
---   | TmUnop α Unop (Term α)
---   | TmBinop α Binop (Term α) (Term α)
---   | TmLet α Id (Term α) (Term α)
---   | TmVariant α Id [Term α]
---   | TmMatch α (Term α) [(Pattern, Term α)]
---   | TmRecord α [(Id, Term α)]
---   -- info, class name, method name, type index
---   | TmPlaceholder α ClassNm Id Type -- for class methods
---   deriving (Eq, Foldable, Functor, Generic, Traversable)
 
 
 -- TODO: I think (I hope..) we can replace the value restriction with
@@ -1407,24 +1324,8 @@ class FreeTyVars a where
 instance FreeTyVars a => FreeTyVars [a] where
   freetyvars = nub . concat . fmap freetyvars
 
--- This relies on the fact that well-formed named types never have
--- free type variables, and that the argument type is not infinite
--- (don't normalize types before computing their free type variables).
+
 instance FreeTyVars Type where
-  -- freetyvars = nub . flip evalState [] .
-  --   (typeRec3M $
-  --    \ty ->
-  --      case ty of
-  --        ty'@(TyVar _ _ _ _) -> do
-  --          xs <- get
-  --          return $ if ty' `elem` xs then [] else [ty']
-  --        (TyAbs x _ _) ->
-  --          modify ((:) $ mkTyVar x) >> return []
-  --        -- ty@(TyConstructor (TypeConstructor
-  --        --                     { tycon_tyvars = tyvars })) -> do
-  --        --   modify ((++) $ mkTyVar <$> tyvars) >> return []
-  --        --   return $ mkTyVar <$> tyvars
-  --        _ -> return [])
   freetyvars = nub . flip runReader [] .
     (typeRecReader (\ty -> case ty of
                        TyAbs _ _ _ -> (:) ty
@@ -1434,8 +1335,6 @@ instance FreeTyVars Type where
           (TyVar _ _ _ _) -> do
             xs <- ask
             return $ if ty `elem` xs then [] else [ty]
-          -- (TyAbs x _ _) ->
-          --   modify ((:) $ mkTyVar x) >> return []
           _ -> return [])
 
 
@@ -1463,11 +1362,6 @@ match_type x (TyConstructor (TypeConstructor { tycon_name = nm1
   if nm1 == nm2 then
     firstJust $ uncurry (match_type x) <$> zip tyargs1 tyargs2
   else Nothing
--- TODO: probably need to deal with application. x could be standing
--- in for a type constructor which is applied to something. I suppose
--- this could only match with a type constructor?
--- Is this sufficient?
--- match_type x s (TyApp (TyVar _ _ y) _) = if x == y then Just s else Nothing
 match_type x (TyApp s1 t1) (TyApp s2 t2) =
   firstJust $ uncurry (match_type x) <$> [(s1, s2), (t1, t2)]
 match_type _ _ _ = Nothing
@@ -1475,9 +1369,9 @@ match_type _ _ _ = Nothing
 
 -- Used when looking up instances of a class for a given type. The
 -- first argument is the given type, and the right is the type
--- associated with some instance. We want type variables on the RHS to
--- be compatible with anything on the left since the instance is
--- general in that variable.
+-- associated with some instance. We let type variables on the RHS be
+-- compatible with anything on the left since the instance is general
+-- in that variable.
 compatible :: Type -> Type -> Bool
 compatible (TyVar _ _ _ _) (TyVar _ _ _ _) = True
 compatible _ (TyVar _ _ _ _) = True

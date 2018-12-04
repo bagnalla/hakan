@@ -99,6 +99,7 @@ import Ast (data_of_term)
   '▵'          { Token $$ TokenTriangle }
   '▿'          { Token $$ TokenTriangleDown }
   '?'          { Token $$ TokenQuestion }
+  ">>="        { Token $$ TokenBind }
   data         { Token $$ TokenData }
   destruct     { Token $$ TokenDestruct }
   as           { Token $$ TokenAs }
@@ -114,6 +115,7 @@ import Ast (data_of_term)
   -- eof          { Token $$ TokenEOF }
 
 %nonassoc ':'
+%left ">>="
 %right arrow '.'
 %nonassoc in
 %right ';'
@@ -193,7 +195,7 @@ Term :
   | BExp { $1 }
 --  | Term ":=" Term { Ast.TmBinop $2 Ast.BUpdate $1 $3 }
   | Term '∘' Term
-    { Ast.TmApp $2 (Ast.TmApp $2  (Ast.TmVar $2 (Id "compose")) $1) $3 }
+    { Ast.TmApp $2 (Ast.TmApp $2 (Ast.TmVar $2 (Id "compose")) $1) $3 }
   | Term ';' Term { Ast.TmApp $2 (Ast.TmAbs $2 (Id "_") Ast.TyUnit $3) $1 }
   | let id '=' Term in Term { Ast.TmLet $1 (idFromToken $2) $4 $6 }
   | Term '▿' Term
@@ -202,6 +204,8 @@ Term :
     { Ast.TmApp $2 (Ast.TmApp $2 (Ast.TmVar $2 (Id "tuple")) $1) $3 }
 --  | destruct Term as barlist(Case) end { Ast.TmMatch $1 $2 $4 }
   | destruct Term as barlist(Case) { Ast.TmMatch $1 $2 $4 }
+  | Term ">>=" Term
+    { Ast.TmApp $2 (Ast.TmApp $2 (Ast.TmVar $2 (Id "bind")) $1) $3 }
 
 BExp :
   Term "<=" Term { Ast.TmBinop $2 Ast.BLe $1 $3 }

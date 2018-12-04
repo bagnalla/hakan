@@ -20,14 +20,6 @@ import Symtab (Id(..), Symtab, map, get)
 import Util (debugPrint, mapSnd, isPermutationOf)
 
 
--- -- The typechecker monad.
--- type TycheckM a =
---   WriterT [String]
---   (ReaderT Context
---    (ExceptT String
---     (StateT Int Identity))) a
-
-
 ---------------------------------------------------------------
 -- | Fill in omitted typed annotations with auto-generated type
 -- variables.  Uses prefix "?X_".

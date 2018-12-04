@@ -7,11 +7,11 @@ import Data.Maybe (catMaybes, listToMaybe)
 import Debug.Trace (trace)
 import System.IO.Unsafe
 
-debugPrint :: String -> b -> b
-debugPrint = trace
-
 -- debugPrint :: String -> b -> b
--- debugPrint = const id
+-- debugPrint = trace
+
+debugPrint :: String -> b -> b
+debugPrint = const id
 
 tupleFun :: (a -> b) -> (a -> c) -> a -> (b, c)
 tupleFun f g x = (f x, g x)
@@ -22,10 +22,9 @@ tupleFun3 f g h x = (f x, g x, h x)
 app2 :: (c -> d -> e) -> (a -> c) -> (b -> d) -> a -> b -> e
 app2 h f g = (. g) . (h . f)
 
--- pairFun :: (a -> c) -> (b -> d) -> (a, b) -> (c, d)
--- pairFun = (. (. snd)) . (tupleFun . (. fst))
-
+-- Specialized to 3-tuples (are there trifunctors?)
 trimap :: (a -> d) -> (b -> e) -> (c -> f) -> (a, b, c) -> (d, e, f)
+-- trimap f g h (x, y, z) = (f x, g y, h z)
 trimap f g h = tupleFun3 (f . fst3) (g . snd3) (h . thd3)
 
 mapFst :: (a -> c) -> (a, b) -> (c, b)
@@ -46,10 +45,6 @@ mapFstM f (x, y) = flip (,) y <$> f x
 mapSndM :: Monad m => (b -> m c) -> (a, b) -> m (a, c)
 mapSndM f (x, y) = (,) x <$> f y
 
--- Specialized to 3-tuples.
--- trimap :: (a -> d) -> (b -> e) -> (c -> f) -> (a, b, c) -> (d, e, f)
--- trimap f g h (x, y, z) = (f x, g y, h z)
-
 -- Specialized to 4-tuples.
 quadmap :: (a -> e) -> (b -> f) -> (c -> g) -> (d -> h) ->
            (a, b, c, d) -> (e, f, g, h)
@@ -66,26 +61,19 @@ isEqualSet :: Eq a => [a] -> [a] -> Bool
 isEqualSet xs ys = isSubsetOf xs ys && isSubsetOf ys xs
 
 elemCount :: Eq a => a -> [a] -> Int
--- elemCount x xs = length $ elemIndices x xs
 elemCount = (.) length . elemIndices
 
--- TODO: this may not be quite right...
 isPermutationOf :: Eq a => [a] -> [a] -> Bool
 isPermutationOf xs ys =
-  -- length xs == length ys && all (`elem` ys) xs && all (`elem` xs) ys
-  -- all (\x -> elemCount x xs == elemCount x ys) xs &&
-  -- all (\y -> elemCount y ys == elemCount y xs) ys
   isEqualSet xs ys && all (\x -> elemCount x xs == elemCount x ys) xs
 
 firstJust :: [Maybe a] -> Maybe a
 firstJust = listToMaybe . catMaybes
 
--- removeLast :: [a] -> [a]
+removeLast :: [a] -> [a]
 -- removeLast [] = error "removeLast: empty list"
 -- removeLast l = take (length l - 1) l
-
 -- Is this more efficient (n vs 2n)?
-removeLast :: [a] -> [a]
 removeLast [] = error "removeLast: empty list"
 removeLast (_:[]) = []
 removeLast (x:xs) = x : removeLast xs

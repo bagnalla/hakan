@@ -115,6 +115,7 @@ tokens :-
   \▵                            { lex' TokenTriangle }
   \▿                            { lex' TokenTriangleDown }
   \?                            { lex' TokenQuestion }
+  ">>="                         { lex' TokenBind }
   data                          { lex' TokenData }
   destruct                      { lex' TokenDestruct }
   as                            { lex' TokenAs }
@@ -242,6 +243,7 @@ data TokenClass =
   | TokenClass
   | TokenInstance
   | TokenWhere
+  | TokenBind
     deriving (Eq,Show)
 
 -- For nice parser error messages.
@@ -334,6 +336,7 @@ unLex TokenIO              = "io"
 unLex TokenClass           = "class"
 unLex TokenInstance        = "instance"
 unLex TokenWhere           = "where"
+unLex TokenBind            = ">>="
 unLex TokenEOF             = "<EOF>"
 
 alexEOF :: Alex Token

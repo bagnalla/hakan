@@ -12,7 +12,6 @@ module Context (
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.List (groupBy, intercalate, nub)
--- import Data.Maybe (fromJust)
 import Data.Tuple (swap)
 
 import Ast
@@ -100,9 +99,6 @@ updKinds f ctx = ctx { ctx_kinds = f $ ctx_kinds ctx }
 -- mkTypeScheme function. This is a really thin layer of abstraction
 -- that doesn't do much.. it could probably be improved.
 
--- newtype TypeScheme = TypeScheme { unTypeScheme :: Type }
---   deriving Eq
-
 -- For each type variable we store its name (as bound in the type) and
 -- list of class constraints.
 
@@ -111,7 +107,7 @@ updKinds f ctx = ctx { ctx_kinds = f $ ctx_kinds ctx }
 data TypeScheme =
   TypeScheme { tyscheme_ty :: Type
              , tyscheme_vars :: [(Id, Kind, [ClassNm])]
-             
+
              -- This is so we know when to replace a method call with
              -- a placeholder when typechecking.
              , tyscheme_ismethod :: Bool }
@@ -148,38 +144,13 @@ superclasses ϕ classNm = do
   case Symtab.get (unClassNm classNm) ϕ of
     Just (TypeClass { tyclass_constrs = constrs
                     , tyclass_index = tyIndex }) ->
-      -- pure (++) <*> concat <$> (sequence $ superclasses <$> constrs) <*>
-      -- pure constrs
       concat (superclasses ϕ <$> constrs) ++ constrs
     Nothing ->
       error $ "superclasses: class " ++ show classNm ++
       " not found. Known classes:\n" ++ show ϕ
 
--- TODO: Should we include superclass constraints as well? It would
--- probably make sense so then the list of constraints is the
--- definitive list.. but we would need to take the typing context as
--- an argument here (or at least the symtab of known classes).
--- generalize_ty :: [(Id, [Id])] -> Bool -> Type -> TypeScheme
--- generalize_ty constrs ismethod ty = mkTypeScheme constrs ismethod ty
-
--- generalize_ty' :: [(Id, Id)] -> Bool -> Type -> TypeScheme
--- generalize_ty' constrs =
---   let constrs' = (\l -> (fst (head l), snd <$> l)) <$>
---                  groupBy (\x y -> fst x == fst y) constrs in
---     generalize_ty constrs'
-
--- generalize_ty' :: [(Id, [Id])] -> Type -> TypeScheme
--- generalize_ty' = flip generalize_ty False
 
 addConstraintsToTypeScheme :: [(Id, Kind, ClassNm)] -> TypeScheme -> TypeScheme
--- addConstraintsToTypeScheme [] ts = ts
--- addConstraintsToTypeScheme ((x, k, classNm):xs)
---   ts@(TypeScheme { tyscheme_vars = vars }) =
---   ts { tyscheme_vars =
---        case assocGet x vars of
---          Just nms -> assocSet x (nub $ classNm : nms) vars
---          Nothing -> assocSet x [classNm] vars }
-
 addConstraintsToTypeScheme constrs ts@(TypeScheme { tyscheme_vars = vars }) =
   ts { tyscheme_vars =
        flattenTuple3 <$> (go constrs (unflattenTuple3 <$> vars)) }
@@ -197,15 +168,14 @@ generalize_ty ismethod ty =
 
 all_class_constraints :: Type -> [(Id, Kind, [ClassNm])]
 all_class_constraints =
-  -- map (mapSnd $ nub . concat . map
-  --      (\constr -> superclasses ϕ constr ++ [constr])) .
   classConstraints . freetyvars
+
 
 -- Get all of the class constraints of a list of types. Not sure if
 -- it's necessary to do it this way.. since there shouldn't be any
 -- duplicate types (and if there were, they would have the same
--- constraints) in the places we are using this currently.
--- We assume any two occurrences have the same kind.
+-- constraints) in the places we are using this currently. We assume
+-- any two occurrences have the same kind.
 classConstraints :: [Type] -> [(Id, Kind, [ClassNm])]
 classConstraints = map flattenTuple3 . (flip foldl [] $
   \acc ty -> case ty of
@@ -215,8 +185,6 @@ classConstraints = map flattenTuple3 . (flip foldl [] $
         Nothing -> assocSet nm (k, ctx) acc
     _ -> acc)
 
--- classConstraints' :: [Type] -> [(Id, Id)]
--- classConstraints' = flattenSnd . classConstraints
 
 -- Build a type scheme from a list of type variables and a body type,
 -- where the variables may appear free in the body. Each variable is
@@ -237,22 +205,6 @@ mkTypeScheme' constrs =
     mkTypeScheme constrs'
 
 
--- mkTypeScheme' :: [(Id, [Id])] -> Type -> TypeScheme
--- mkTypeScheme' vars ty = mkTypeScheme vars ty False
-
--- mkTypeScheme' :: [(Id, [Id])] -> Type -> TypeScheme
--- mkTypeScheme' constrs ty = mkTypeScheme constrs ty False
-
--- -- Build a type scheme from a list of Ids and a type, where the Ids
--- -- may appear free as type variables in the body.
--- mkTypeScheme :: [Id] -> Type -> TypeScheme
--- mkTypeScheme xs = TypeScheme . go xs
---   where
---     go :: [Id] -> Type -> Type
---     go [] ty = ty
---     go (y:ys) ty = TyAbs y KStar $ go ys ty
-
-
 -- Strip off type abstractions, leaving the body unchanged.
 open_tyscheme :: TypeScheme -> Type
 open_tyscheme (TypeScheme { tyscheme_ty = ty }) = go ty
@@ -261,11 +213,6 @@ open_tyscheme (TypeScheme { tyscheme_ty = ty }) = go ty
     go (TyAbs _ _ s) = go s
     go t = t
 
--- map_tyscheme :: (Type -> Type) -> TypeScheme -> TypeScheme
--- map_tyscheme f = TypeScheme . f . unTypeScheme
-
--- mapM_tyscheme :: Monad m => (Type -> m Type) -> TypeScheme -> m TypeScheme
--- mapM_tyscheme f = fmap TypeScheme . f . unTypeScheme
 
 -- Passing False for the type variables rigidness doesn't matter since
 -- the Eq instance for types ignores it.
@@ -273,14 +220,9 @@ instantiate_tyscheme :: (Show α, Num s, Show s, MonadState s m) =>
                         α -> Bool -> TypeScheme -> m Type
 instantiate_tyscheme _ b (TypeScheme { tyscheme_ty = ty
                                      , tyscheme_vars = vars }) = do
-  -- debugPrint ("\ninstantiate_tyscheme") $
-  --   debugPrint ("ty: " ++ show ty) $
-  --   debugPrint ("vars: " ++ show vars) $ do
   x <- foldM (\acc (nm, k, ctx) ->
                  TyApp acc <$> TyVar b k ctx . Id <$> nextSym "?Y_")
        ty vars
-    -- debugPrint ("x: " ++ show x) $
-    --   debugPrint ("x normalized: " ++ show (normalize_ty x)) $
   return x
 
 instantiate_tyscheme' :: (Show α, Num s, Show s, MonadState s m) =>
@@ -291,39 +233,6 @@ instantiate_tyscheme' fi = instantiate_tyscheme fi False
 -----------------------
 -- | Type normalization
 
--- For some reason we can't use the monadic recursion scheme here
--- because it diverges on infinite types. I don't understand why
--- though... It also diverges if we try to print the type being
--- normalized. This could just take η as an argument instead of being
--- in the reader monad but so far it's fine like this.
--- normalize :: (Show α, MonadReader Context m) => α -> Type -> m Type
--- normalize fi ty = do
---   η <- asks ctx_datatypes
---   return $ (typeRec $
---             \ty ->
---               case ty of
---                 TyApp (TyAbs x _ t) s ->
---                   tysubst' s (TyVar False x) t
---                 _ -> resolveTyNames fi η ty) ty
-
--- normalize :: Show α => α -> Symtab TypeScheme -> Type -> Type
--- normalize fi η = typeRec $
---   \ty ->
---     case ty of
---       TyApp (TyAbs x _ t) s ->
---         tysubst' s (mkTyVar x) t
---       -- TyApp (TyConstructor tycon@(TypeConstructor
---       --                             { tycon_tyvars = tyvars
---       --                             , tycon_kinds = kinds
---       --                             , tycon_tyargs = tyargs
---       --                             , tycon_instantiated = t })) s ->
---       --   let x = tyvars !! length tyargs in
---       --     TyConstructor $
---       --     tycon { tycon_kinds = kinds ++ [KStar]
---       --           , tycon_tyargs = tyargs ++ [s]
---       --           , tycon_instantiated = tysubst' s (mkTyVar x) t }
---       _ -> resolveTyNames fi η ty
-
 normalize_ty :: Type -> Type
 normalize_ty = typeRec $
   \ty -> case ty of
@@ -331,7 +240,6 @@ normalize_ty = typeRec $
     TyApp (TyAbs x _ t) s -> tysubst' s (mkTyVar x) t
     -- Type constructors can be applied.
     TyApp s@(TyConstructor _) t ->
-      -- debugPrint ("\nnormalize_ty ty: " ++ showTypeLight ty) $
       case applyTypeConstructor s t of
         TyConstructor tycon@(TypeConstructor { tycon_instantiated = u }) ->
           TyConstructor $ tycon { tycon_instantiated = normalize_ty u }
@@ -341,7 +249,6 @@ normalize_ty = typeRec $
     -- constructor).
     TyAbs x _ (TyConstructor _) -> etaReduceTypeConstructor ty
     -- Eta reduction
-    -- TyApp (TyAbs x _ s) (TyVar _ _ y) -> if x == y then s else ty
     TyAbs x _ (TyApp s (TyVar _ _ _ y)) ->
       debugPrint ("normalize_ty: " ++ show x ++ " " ++ show y) $
       if x == y then s else ty
@@ -366,28 +273,17 @@ unfold fi η (TyApp ty s) =
                           , tycon_ty = inst
                           , tycon_instantiated = t }) ->
       if length tyvars == length tyargs then
-        -- debugPrint ("attempting to apply " ++ showTypeLight ty ++
-        --             " to " ++ showTypeLight s) $
         error $ "unfold: type constructor " ++ show tycon ++
         " is already fully applied"
       else
-        -- debugPrint ("\nAPPLYING " ++ show tycon ++ " to " ++ show s) $
-        -- let x = tyvars !! length tyargs in
         let s' = unfold fi η s in
           TyConstructor $
           tycon { tycon_kinds = kinds ++ [KStar]
                 , tycon_tyargs = tyargs ++ [s']
                 , tycon_ty = unfold fi η inst
                 , tycon_instantiated = unfold fi η $ TyApp t s' }
-    -- TyVar _ _ _ ->
     _ -> 
       TyApp (unfold fi η ty) $ unfold fi η s
-    -- _ -> -- TODO: we may need to allow type variables here as well
-    --      -- since we sometimes have variables in the place of type
-    --      -- constructors.
-    --   error $ "unfold: expected type abstraction or type constructor on \
-    --           \left side of application.\ninstead found: " ++
-    --   show (unfold fi η ty)
 unfold fi η (TyConstructor tycon) =
   TyConstructor $ mapTypeConstructor (unfold fi η) tycon
 unfold _ _ ty = ty
