@@ -1,0 +1,8 @@
+
+def fix = λg. λx. g (fix g) x
+
+-- pure fact : Int -> Int
+-- def fact = fixp (λg. λn. if n = 0 then 1 else n * g (n - 1))
+
+run (fix (λg. λn. if n = 0 then 1 else n * g (n - 1))) 5
+-- run fact 5

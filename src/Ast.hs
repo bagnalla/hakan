@@ -109,7 +109,6 @@ module Ast (
 
 import Control.Monad
 import Control.Monad.Reader
-import Control.Monad.State
 import Data.Bifunctor
 import Data.List (intercalate, nub)
 import Data.Monoid
@@ -561,7 +560,6 @@ typesRec f s t = f s t
 data Unop =
   UMinus
   | UNot
-  | UFix
   | URef
   | UDeref
   deriving (Eq, Generic, Show)
@@ -608,6 +606,9 @@ data Term α =
   | TmPlaceholder α ClassNm Id Type -- for class methods
   deriving (Eq, Foldable, Functor, Generic, Traversable)
 
+
+-- We provide special pattern syntax for pairs even though they are
+-- implemented as variants.
 data Pattern =
   PVar Id
   | PUnit
@@ -687,10 +688,11 @@ termTypeRec f = termRec $
 
 termTypeRecM :: Monad m => (Type -> m Type) -> Term α -> m (Term α)
 termTypeRecM f = termRecM $
-  \tm -> case tm of
-           TmAbs fi x ty tm -> pure (TmAbs fi x) <*> f ty <*> pure tm
-           TmPlaceholder fi x y ty -> TmPlaceholder fi x y <$> f ty
-           _ -> return tm
+  \tm ->
+    case tm of
+      TmAbs fi x ty body -> pure (TmAbs fi x) <*> f ty <*> pure body
+      TmPlaceholder fi x y ty -> TmPlaceholder fi x y <$> f ty
+      _ -> return tm
 
 -- Substitute s for t in tm
 termSubst :: Eq α => Term α -> Term α -> Term α -> Term α
@@ -714,12 +716,12 @@ data Command α =
   deriving (Functor, Generic)
 
 
-commandTermRecM :: Monad m => (Term α -> m (Term α)) ->
-                   Command α -> m (Command α)
-commandTermRecM f (CLet fi x tm) = CLet fi x <$> f tm
-commandTermRecM f (CEval fi tm) = CEval fi <$> f tm
-commandTermRecM f (CCheck fi tm) = CCheck fi <$> f tm
-commandTermRecM _ com = return com
+-- commandTermRecM :: Monad m => (Term α -> m (Term α)) ->
+--                    Command α -> m (Command α)
+-- commandTermRecM f (CLet fi x tm) = CLet fi x <$> f tm
+-- commandTermRecM f (CEval fi tm) = CEval fi <$> f tm
+-- commandTermRecM f (CCheck fi tm) = CCheck fi <$> f tm
+-- commandTermRecM _ com = return com
 
 
 commandTypeRec :: (Type -> Type) -> Command α -> Command α

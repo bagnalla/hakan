@@ -8,16 +8,19 @@ import Control.Monad.State
 import Control.Monad.Writer
 
 import Ast
-import Symtab (Symtab, Id(..), empty, add, fold)
-import qualified Symtab (get)
+import Symtab (Id(..), empty, add)
 import Eval (eval, Value(..), Env(..))
 import Util (debugPrint)
 
 type InterpM a =
   WriterT [String] (ReaderT Env (StateT (Int, Env) Identity)) a
 
+initEnv :: Env
 initEnv = Env empty
+
+initState :: (Int, Env)
 initState = (0, initEnv)
+
 
 -- | Interpret a program by interpreting its commands in sequence.
 -- For now since we have no I/O, we can build up a list of strings to
@@ -34,9 +37,13 @@ interpCommands (CDecl _ _ _ : cs) = interpCommands cs
 interpCommands (CCheck _ _ : cs) = interpCommands cs
 interpCommands (CClass _ _ _ _ _ : cs) = interpCommands cs
 interpCommands (CInstance _ _ _ _ _ : cs) = interpCommands cs
+
 interpCommands (CLet _ nm tm : cs) = do
-  v <- eval tm
+  -- v <- eval tm
+  -- debugPrint ("CLet nm: " ++ show nm) $ do
+  v <- mfix (\x -> local (Env . add nm x . unEnv) $ eval tm)
   local (Env . add nm v . unEnv) $ interpCommands cs
+
 interpCommands (CEval _ tm : []) = eval tm
 interpCommands (CEval _ tm : cs) = eval tm >> interpCommands cs
 

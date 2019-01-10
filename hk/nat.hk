@@ -47,11 +47,11 @@ def plus = λ n. λ m.
   | Zero → m
   | Succ n' → Succ (plus n' m)
 
-pure minus : Nat -> Nat -> Nat
+pure minus : Nat → Nat → Nat
 def minus = λ n. λ m.
   destruct m as
-  | Zero -> n
-  | Succ m' -> minus (pred n) m'
+  | Zero → n
+  | Succ m' → minus (pred n) m'
 
 pure mult : Nat → Nat → Nat
 def mult = λ n. λ m.
@@ -65,25 +65,24 @@ def div = λ n. λ m.
   else Succ (div (minus n m) m)
   
 # pow
-pure pow : Nat -> Nat -> Nat
+pure pow : Nat → Nat → Nat
 def pow = λ n. λ m.
   destruct m as
-  | Zero -> one
-  | Succ m' -> if iszero m' then n else mult n (pow n m')
+  | Zero → one
+  | Succ m' → if iszero m' then n else mult n (pow n m')
 
 # fact
-pure fact : Nat -> Nat
+pure fact : Nat → Nat
 def fact = λ n.
   destruct n as
-  | Zero -> one
-  | Succ n' -> mult n (fact n')
+  | Zero → one
+  | Succ n' → mult n (fact n')
 
-pure compose : (a → b) → (b → c) → a → c
-def compose = λf. λg. λx. g (f x)
+pure compose : (b → c) → (a → b) → a → c
+def compose = λg. λf. λx. g (f x)
 
 pure natOfInt : ℤ → Nat
 def natOfInt = λ i.
-  -- if i <= 0 then Zero else Succ (natOfInt (i-1))
   if i <= 0 then Zero else (Succ ∘ natOfInt) (i-1)
 
 pure intOfNat : Nat → ℤ

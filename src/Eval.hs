@@ -129,11 +129,11 @@ eval (TmUnop _ u tm) = do
         VBool True  -> return $ VBool False
         VBool False -> return $ VBool True
         _ -> evalError $ "eval: " ++ show v ++ " isn't a bool"
-    UFix ->
-      case v of
-        VClos clos nm tm' ->
-          mfix $ \f -> local (const $ extendEnv nm f clos) $ eval tm'
-        _ -> evalError $ "eval: " ++ show v ++ " isn't a closure"
+    -- UFix ->
+    --   case v of
+    --     VClos clos nm tm' ->
+    --       mfix $ \f -> local (const $ extendEnv nm f clos) $ eval tm'
+    --     _ -> evalError $ "eval: " ++ show v ++ " isn't a closure"
     URef -> do
       loc <- freshLoc
       modify $ \(i, Env env) -> (i, Env $ add loc v env)

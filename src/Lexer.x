@@ -44,8 +44,6 @@ tokens :-
   \⊤                            { lex' $ TokenBool True }
   false                         { lex' $ TokenBool False }
   \⊥                            { lex' $ TokenBool False }
-  fix                           { lex' TokenFix }
-  \μ                            { lex' TokenFix }
   if                            { lex' TokenIf }
   then                          { lex' TokenThen }
   else                          { lex' TokenElse }
@@ -175,7 +173,6 @@ data TokenClass =
   | TokenSucc
   | TokenPred
   | TokenIszero
-  | TokenFix
   | TokenIf
   | TokenThen
   | TokenElse
@@ -272,7 +269,6 @@ unLex TokenEq              = "="
 unLex TokenSucc            = "succ"
 unLex TokenPred            = "pred"
 unLex TokenIszero          = "iszero"
-unLex TokenFix             = "fix"
 unLex TokenIf              = "if"
 unLex TokenThen            = "then"
 unLex TokenElse            = "else"

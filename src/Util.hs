@@ -5,7 +5,6 @@ import Data.Either
 import Data.List (elemIndices, isInfixOf)
 import Data.Maybe (catMaybes, listToMaybe)
 import Debug.Trace (trace)
-import System.IO.Unsafe
 
 -- debugPrint :: String -> b -> b
 -- debugPrint = trace

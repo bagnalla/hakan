@@ -34,7 +34,6 @@ import Ast (data_of_term)
   true         { Token $$ (TokenBool True) }
   false        { Token $$ (TokenBool False) }
   intVal       { Token _ (TokenInt _) }
-  fix          { Token $$ TokenFix }
   if           { Token $$ TokenIf }
   then         { Token $$ TokenThen }
   else         { Token $$ TokenElse }
@@ -129,7 +128,7 @@ import Ast (data_of_term)
 %left '*' '/' '×' '⊗'
 %left '∘'
 %left '▵' '▿'
-%nonassoc fix true false intVal id unit bool int char refty
+%nonassoc true false intVal id unit bool int char refty
 %nonassoc is
 %left APP
 %nonassoc UNOP
@@ -219,7 +218,6 @@ BExp :
 AppTerm :
   ATerm { $1 }
   | AppTerm ATerm { Ast.TmApp (data_of_term $1) $1 $2 }
-  | fix ATerm { Ast.TmUnop $1 Ast.UFix $2 }
 
 -- Atomic terms
 ATerm :
@@ -289,8 +287,7 @@ Command :
   pure id TyDeclBinder { Ast.CDecl (infoFromToken $2) (idFromToken $2) $3 }
   | def id Binder {
       let (fi, x) = (infoFromToken $2, idFromToken $2) in
-        Ast.CLet fi x (Ast.TmUnop fi Ast.UFix (Ast.TmAbs fi x
-                 (Ast.mkTyVar (Id "")) $3)) }
+        Ast.CLet fi x $3 }
   | evaluate Term { Ast.CEval $1 $2 }
   | '〚' Term '〛' { Ast.CEval $1 $2 }
   | data ClassConstraints fatarrow capid list(id) '=' barlist(Ctor)

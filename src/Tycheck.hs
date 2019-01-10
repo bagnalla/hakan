@@ -169,13 +169,13 @@ tycheckTerm (TmUnop fi u tm) = do
   (tm', c) <- tycheckTerm tm
   let ty = ty_of_term tm'
   case u of
-    UFix -> do
-      y <- nextSym "?Y_"
-      let tyy = mkTyVar (Id y)
-      let c' = c ++ [(ty, TyArrow tyy tyy)]
-      tryUnify fi c' $
-        \tsubst ->
-          return (tysubstAll' tsubst $ TmUnop (mkData tyy) u tm', c')
+    -- UFix -> do
+    --   y <- nextSym "?Y_"
+    --   let tyy = mkTyVar (Id y)
+    --   let c' = c ++ [(ty, TyArrow tyy tyy)]
+    --   tryUnify fi c' $
+    --     \tsubst ->
+    --       return (tysubstAll' tsubst $ TmUnop (mkData tyy) u tm', c')
     URef ->
       return (TmUnop (mkData $ TyRef ty) URef tm', c)
     UDeref -> do
@@ -310,13 +310,28 @@ tycheckCommand (CDecl fi x ty) = do
   CDecl (mkData TyUnit) x <$>
     (wellKinded fi $ rigidify_type $ normalize_ty $ resolveTyNames fi η ty)
 
+    
+-- tycheckCommand (CLet fi x tm) = do
+--   tyy <- mkTyVar . Id <$> nextSym "?Y_"
+--   (tm', c) <- local (updGamma $ add x $ mkTypeScheme' [] False tyy) $ tycheckTerm tm
+--   let c' = c ++ [(tyy, ty_of_term tm')]
+--   tryUnify fi c' $
+--     \_ ->
+--       tryUnify fi c $
+--       \tsubst ->
+--         return $ CLet (mkData (tysubstAll' tsubst $ ty_of_term tm')) x $
+--         tysubstAll' tsubst <$> tysubstAll' tsubst tm'
+
 tycheckCommand (CLet fi x tm) = do
-  (tm', c) <- tycheckTerm tm
-  tryUnify fi c $
+  tyy <- mkTyVar . Id <$> nextSym "?Y_"
+  -- local (updGamma $ add x tyscheme) $
+  (tm', c) <- local (updGamma $ add x $ mkTypeScheme' [] False tyy) $
+    tycheckTerm tm
+  let c' = c ++ [(tyy, ty_of_term tm')]
+  tryUnify fi c' $
     \tsubst ->
       return $ CLet (mkData (tysubstAll' tsubst $ ty_of_term tm')) x $
       tysubstAll' tsubst <$> tysubstAll' tsubst tm'
-
 
       -- ^^^ this tysubst thing appears in multiple places now. TODO:
       -- make a single function for doing tysubst on a term and also
@@ -326,7 +341,7 @@ tycheckCommand (CEval fi tm) = do
   (tm', c) <- tycheckTerm tm
   tryUnify fi c $
     \tsubst -> do
-      (gen, tyscheme) <- process_term fi tsubst tm'
+      (gen, _) <- process_term fi tsubst tm'
       return $ CEval (mkData $ ty_of_term gen) gen
   
 tycheckCommand (CData _ nm tyvars ctors) =
