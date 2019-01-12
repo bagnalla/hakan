@@ -55,7 +55,7 @@ def minus = λ n. λ m.
 
 pure mult : Nat → Nat → Nat
 def mult = λ n. λ m.
-  destruct n as 
+  destruct n as
   | Zero → Zero
   | Succ n' → plus (mult n' m) m
 

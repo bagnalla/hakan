@@ -61,12 +61,22 @@ def map = λ f. λ l.
   | Nil → Nil
   | Cons x l' → Cons (f x) (map f l')
 
+pure sum : [ℤ] → ℤ
+def sum = λl.
+  destruct l as
+  | Nil → 0
+  | Cons x l' → x + sum l'
 
 pure l : [ℤ]
 def l = tail (range 10)
 
-〚 head l 〛
+-- 〚 head l 〛
 
-〚 map (λ x. x + 1) l 〛
+-- 〚 map (λ x. x + 1) l 〛
 
 -- [| map (λ x. x + 1) l |]
+
+pure l2 : [ℤ]
+def l2 = map (λ x. x + 1) l
+
+run sum l2

@@ -3,9 +3,10 @@ module Main where
 import Control.Monad
 import System.Environment (getArgs)
 -- import System.IO (hGetContents)
-import Ast (Prog)
+import Ast (Prog(..))
 import Core (genTypeVars)
 import Interp (interpProg)
+import JS (compileJS)
 import Lexer (AlexPosn)
 import Parser (parseProg)
 import Preprocessor (importLines, substImports)
@@ -37,6 +38,12 @@ main = do
               Left s -> putStrLn "" >> error s
               Right (p', warnings) -> do
                 forM_ warnings putStrLn
+                let js_src = compileJS "" $ prog_of p'
+                -- putStrLn js_src
+                if length args > 1 then do
+                  putStrLn $ "Writing generated JS to " ++ (args!!1) ++ "."
+                  writeFile (args!!1) js_src else
+                  return ()
                 return $ interpProg p'
 
   -- let result = parseGenOnly src'

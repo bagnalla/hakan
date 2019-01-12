@@ -705,6 +705,7 @@ data Command α =
   CDecl α Id Type
   | CLet α Id (Term α)
   | CEval α (Term α)
+  -- | CPrint α (Term α)
   | CCheck α (Term α)
   | CData α Id [Id] [(Id, [Type])]
   | CRecord α Id [Id] [(Id, Type)]
