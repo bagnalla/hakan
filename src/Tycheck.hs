@@ -5,7 +5,7 @@
 -- metadata.
 
 module Tycheck (
-  TyData, runTycheck, tycheckProg
+  TyData(..), runTycheck, tycheckProg
   ) where
 
 import Control.Monad.Except
@@ -28,6 +28,8 @@ import Context
 import Unify (ConstrSet, unify, printConstrSet, printUnifyLog)
 import Util
 
+instance MonadFail Identity where
+  fail = error
 
 -- TODO: Type synonyms and newtypes.
 
@@ -194,8 +196,7 @@ tycheckTerm (TmUnop fi u tm) = do
       let c' = c ++ [(ty,
                       case u of
                         UMinus -> TyInt
-                        UNot -> TyBool
-                        _ -> error "tycheckTerm TmUnop: impossible case")]
+                        UNot -> TyBool)]
       tryUnify fi c' $
         \tsubst ->
           return (tysubstAll' tsubst $ TmUnop (mkData ty) u tm', c')
@@ -349,6 +350,7 @@ tycheckCommand (CData _ nm tyvars ctors) =
 
 tycheckCommand (CRecord _ nm tyvars fields) =
   return $ CRecord (mkData TyUnit) nm tyvars fields
+  -- return $ CRecord (mkData $ TyRecord nm tyvars fields) nm tyvars fields
 
 tycheckCommand (CCheck fi tm) = do
   (tm', c) <- tycheckTerm tm
@@ -488,13 +490,16 @@ tycheckCommands (com:coms) = do
           return $ CLet fi' x gen : coms'
 
     CData _ nm tyvars ctors ->
+      if any (== '_') $ unId nm then
+        throwError $ "Type error: underscore in variant type name"
+      else
       case kindCheckVariantOrRecord nm tyvars (concat $ snd <$> ctors) ι of
         Right (k, ks) -> do
           let ty = mkTypeConstructor' nm tyvars ks $
                    TyVariant nm (mkTyVar <$> tyvars) ctors
           let tyscheme =
                 mkTypeScheme (zip3 tyvars ks $ repeat [])
-                False (mkTyApp ty $ mkTyVar <$> tyvars)
+                False (normalize_ty $ mkTyApp ty $ mkTyVar <$> tyvars)
           let open = open_tyscheme tyscheme
           ctorFuns <-
             mapM (mapSndM $ \ctorTys ->
@@ -503,7 +508,7 @@ tycheckCommands (com:coms) = do
                      False (mkArrowType $ ctorTys ++ [open])) ctors
           let fvs = nub $ concat $ map (freetyvars . snd) ctors
           if not $ all (`elem` map mkTyVar tyvars) fvs then
-            throwError $ "Type error : free type variable in definition of "
+            throwError $ "Type error: free type variable in definition of "
             ++ show nm
             else do
             if not $ all (`elem` fvs) (mkTyVar <$> tyvars) then
@@ -525,50 +530,57 @@ tycheckCommands (com:coms) = do
                          , ctx_kinds = add nm k $ ctx_kinds ctx
                          }) $
             tycheckCommands coms
-          return $ com' : coms'
+          return $ (TyData open <$ com') : coms'
         Left msg -> typeError fi msg
   
-    CRecord _ nm tyvars fields -> do
-      γ <- asks ctx_gamma
-      mapM_ (\x -> case Symtab.get x γ of
-                      Just _ -> throwError $ "field name " ++ show x
-                                ++ " already exists at " ++ show fi
-                      Nothing -> return ()) $ fst $ unzip fields
-      let ty = mkTypeConstructor' nm tyvars (const KStar <$> tyvars) $
-               TyRecord nm (mkTyVar <$> tyvars) fields
-      let tyscheme =
-            mkTypeScheme (zip3 tyvars (repeat KUnknown) $ repeat [])
-            False (mkTyApp ty $ mkTyVar <$> tyvars)
-      let open = open_tyscheme tyscheme
-      fieldFuns <-
-        mapM (mapSndM $ \fieldTy ->
-                 return $
-                 mkTypeScheme (zip3 tyvars (repeat KUnknown) $ repeat [])
-                 False (TyArrow open fieldTy))
-        fields
-      let fvs = concat $ map (freetyvars . snd) fields
-      if not $ all (`elem` (mkTyVar <$> tyvars)) fvs then
-        throwError $ "Type error : free type variable in definition of "
-        ++ show nm
-        else do
-        if not $ all (`elem` fvs) (mkTyVar <$> tyvars) then
-          tell ["Type warning: unused type variable in definition of "
-                 ++ show nm] else return ()
-      coms' <-
-        local (\ctx ->
-                  ctx { ctx_datatypes = add nm tyscheme $ ctx_datatypes ctx
-                      , ctx_fields =
-                          foldl (\acc x -> add x tyscheme acc)
-                          (ctx_fields ctx) (fst $ unzip fields)
-                        -- Add types of field projection functions to
-                        -- the typing context.
-                      , ctx_gamma =
-                          foldl (\acc (fieldName, fieldTy) ->
-                                    add fieldName fieldTy acc)
-                          (ctx_gamma ctx) fieldFuns
-                      }) $
-        tycheckCommands coms
-      return $ com' : coms'
+    CRecord _ nm tyvars fields ->
+      if any (== '_') $ unId nm then
+        throwError $ "Type error: underscore in record type name"
+      else
+        case kindCheckVariantOrRecord nm tyvars (snd <$> fields) ι of
+          Right (k, ks) -> do
+            γ <- asks ctx_gamma
+            mapM_ (\x -> case Symtab.get x γ of
+                           Just _ -> throwError $ "field name " ++ show x
+                                     ++ " already exists at " ++ show fi
+                           Nothing -> return ()) $ fst $ unzip fields
+            let ty = mkTypeConstructor' nm tyvars ks $
+                     TyRecord nm (mkTyVar <$> tyvars) fields
+            let tyscheme =
+                  mkTypeScheme (zip3 tyvars ks $ repeat [])
+                  False (normalize_ty $ mkTyApp ty $ mkTyVar <$> tyvars)
+            let open = open_tyscheme tyscheme
+            fieldFuns <-
+              mapM (mapSndM $ \fieldTy ->
+                       return $
+                     mkTypeScheme (zip3 tyvars ks $ repeat [])
+                     False (TyArrow open fieldTy))
+              fields
+            let fvs = concat $ map (freetyvars . snd) fields
+            if not $ all (`elem` (mkTyVar <$> tyvars)) fvs then
+              throwError $ "Type error : free type variable in definition of "
+              ++ show nm
+              else do
+              if not $ all (`elem` fvs) (mkTyVar <$> tyvars) then
+                tell ["Type warning: unused type variable in definition of "
+                      ++ show nm] else return ()
+            coms' <-
+              local (\ctx ->
+                       ctx { ctx_datatypes = add nm tyscheme $ ctx_datatypes ctx
+                           , ctx_fields =
+                             foldl (\acc x -> add x tyscheme acc)
+                             (ctx_fields ctx) (fst $ unzip fields)
+                           -- Add types of field projection functions to
+                           -- the typing context.
+                           , ctx_gamma =
+                             foldl (\acc (fieldName, fieldTy) ->
+                                      add fieldName fieldTy acc)
+                             (ctx_gamma ctx) fieldFuns
+                           , ctx_kinds = add nm k $ ctx_kinds ctx
+                           }) $
+              tycheckCommands coms
+            return $ (TyData open <$ com') : coms'
+          Left msg -> typeError fi msg
 
     CClass _ constrs classNm tyIndex methods -> do
       η <- asks ctx_datatypes
@@ -853,12 +865,17 @@ patternType fi (PRecord pfields) = do
   if not $ allEq tys' then
     throwError $ "mal-formed record pattern at " ++ show fi
     else do
-    recTy@(TyRecord _ _ fields) <- instantiate_tyscheme' fi $ tys'!!0
+    -- asdf <- instantiate_tyscheme' fi $ tys'!!0
+    -- debugPrint ("tyscheme: " ++ show asdf) $ do
+      -- recTy@(TyRecord _ _ fields) <- instantiate_tyscheme' fi $ tys'!!0
+    recTy@(TyConstructor (TypeConstructor { tycon_instantiated =
+                                              TyRecord _ _ fields })) <-
+      pure (unfold fi) <*> asks ctx_datatypes <*> (instantiate_tyscheme' fi $ tys'!!0)
     cs' <- mapM (\(nm, ty) ->
-                     case assocGet nm fields of
-                       Just ty' -> return (ty, ty')
-                       Nothing -> throwError $ "invalid record field " ++
-                                  show nm ++ " at " ++ show fi) $
+                    case assocGet nm fields of
+                      Just ty' -> return (ty, ty')
+                      Nothing -> throwError $ "invalid record field " ++
+                                 show nm ++ " at " ++ show fi) $
            zip nms tys
     return (recTy, binds, cs ++ cs')
 
@@ -869,11 +886,12 @@ wellKinded :: Show α => α -> Type -> TycheckM Type
 wellKinded fi ty = do
   η <- asks ctx_datatypes
   ι <- asks ctx_kinds
-  case runKindCheck ι [] $ unfold fi η ty of
-    Right _ -> return ty
-    Left msg -> typeError fi $ "Type error: " ++ show ty ++
-                " is not well-kinded: " ++ msg
-
+  debugPrint ("η: " ++ show η) $
+    debugPrint ("ι: " ++ show ι) $
+    case runKindCheck ι [] $ unfold fi η ty of
+      Right _ -> return ty
+      Left msg -> typeError fi $ "Type error: " ++ show ty ++
+                  " is not well-kinded: " ++ msg
 
 mkDictId :: ClassNm -> Id -> Id
 mkDictId classNm var = Id $ "?" ++ show classNm ++ "_" ++ show var

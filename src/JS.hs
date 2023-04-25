@@ -165,7 +165,7 @@ termToJS (TmAbs _ (Id x) _ tm) = do
   x' <- process_ident x
   tm' <- termToJS tm
   return $ JSFunctionExpression space JSIdentNone nil
-    (JSLOne $ JSIdentName nil x') nil
+    (JSLOne $ JSIdentifier nil x') nil
     (JSBlock nil [mkReturn tm'] nil)
 
 termToJS (TmApp _ tm1 tm2) = do
@@ -206,7 +206,7 @@ termToJS (TmLet _ (Id x) tm1 tm2) = do
   tm1' <- termToJS tm1
   tm2' <- termToJS tm2
   return $ JSCallExpression (JSFunctionExpression space JSIdentNone nil
-                             (JSLOne $ JSIdentName nil x') nil
+                             (JSLOne $ JSIdentifier nil x') nil
                              (JSBlock nil [mkReturn tm2'] nil))
     nil (JSLOne tm1') nil
 
@@ -235,7 +235,7 @@ termToJS (TmMatch _ discrim cases) = do
 
   return $ JSCallExpression
     (JSFunctionExpression space JSIdentNone nil
-      (JSLOne $ JSIdentName nil x) nil
+      (JSLOne $ JSIdentifier nil x) nil
       (JSBlock nil
        [
          mkCond discrim' $ zip3 predicates bindings cases'
@@ -273,7 +273,7 @@ patternJSPredicate :: Pattern -> JSExpression
 patternJSPredicate p =
   let body = go p (JSIdentifier nil "x") in
     JSFunctionExpression space JSIdentNone nil
-    (JSLOne $ JSIdentName nil "x") nil
+    (JSLOne $ JSIdentifier nil "x") nil
     (JSBlock nil [mkReturn body] nil)
   where
     go :: Pattern -> JSExpression -> JSExpression
@@ -382,7 +382,7 @@ commandToJS (CRecord _ _ _ fields) = do
   mapM (\(Id x, _) -> do
            x' <- process_ident x
            return $ mkVarStmt x' (  JSFunctionExpression space JSIdentNone nil
-               (JSLOne $ JSIdentName nil "x") nil
+               (JSLOne $ JSIdentifier nil "x") nil
                (JSBlock nil [JSReturn nil
                              (Just $ JSMemberDot (JSIdentifier nil "x")
                               nil (JSIdentifier nil x'))
@@ -403,10 +403,10 @@ mkCurriedJS :: [String] -> JSBlock -> JSExpression
 mkCurriedJS [] _ = error "mkCurriedJS: expected at least one argument"
 mkCurriedJS [x] body =
   JSFunctionExpression space JSIdentNone nil
-  (JSLOne $ JSIdentName nil x) nil body
+  (JSLOne $ JSIdentifier nil x) nil body
 mkCurriedJS (x:xs) body =
   JSFunctionExpression space JSIdentNone nil
-    (JSLOne $ JSIdentName nil x) nil
+    (JSLOne $ JSIdentifier nil x) nil
     (JSBlock nil [mkReturn $ mkCurriedJS xs body] nil)  
 
 

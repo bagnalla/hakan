@@ -4,13 +4,14 @@
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE LambdaCase #-}
 
 -- | This module defines the internal language syntax.
 
 module Ast (
   Command(..), Prog(..), Term(..), Type(..), Unop(..), Binop(..),
   eraseData, isArithBinop, isBooleanBinop, isBUpdate, binopType,
-  typeRec, typeRec2, termRec, termTypeRec, mkArrowType, typeKindRec,
+  typeRec, typeRec2, termRec, termRecM, termTypeRec, mkArrowType, typeKindRec,
   data_of_term, data_of_command, Pattern(..), typeRecM, Kind(..), mkAbs,
   termTypeRecM, commandTypeRec, commandTypeRecM, typeRec2M, mkTyVar,
   propagateClassConstraints, progTypeRec, TypeClass(..), ClassInstance(..),
@@ -19,8 +20,11 @@ module Ast (
   mkTypeConstructor, mkTypeConstructor', mapTypeConstructor, mkTyApp,
   termRec2, termSubst, match_type, mkPair, mkProj1, mkProj2, mkAppTree,
   mkTupleProjection, mkApp, compatible, mkTuple, typesRec, isTmVar,
-  showTypeLight, chopTypeConstructor, applyTypeConstructor,
-  etaReduceTypeConstructor, ClassNm(..), containsType
+  showTypeLight, chopTypeConstructor, applyTypeConstructor, showCommand,
+  etaReduceTypeConstructor, ClassNm(..), containsType, isAssertCommand,
+  isEvalCommand, isTypeCommand, isSuperCombinator, freevars, patternVars,
+  patternVarTypes, tagOfConstructor, nameOfVariant, nameOfRecord, returnType,
+  instantiated
   ) where
 
 
@@ -114,9 +118,9 @@ import Data.List (intercalate, nub)
 import Data.Monoid
 import Data.Tree
 import GHC.Generics (Generic)
-import Generic.Random.Generic
+-- import Generic.Random.Generic
 
-import Test.QuickCheck
+-- import Test.QuickCheck
 
 import Symtab (Id(..), Symtab)
 import qualified Symtab (map)
@@ -133,10 +137,10 @@ data Kind =
   | KUnknown
   deriving (Eq, Generic)
 
-instance Arbitrary Kind where
-  arbitrary = genericArbitrary' Z uniform
-  shrink (KArrow s t) = [s, t]
-  shrink _ = []
+-- instance Arbitrary Kind where
+--   arbitrary = genericArbitrary' Z uniform
+--   shrink (KArrow s t) = [s, t]
+--   shrink _ = []
 
 instance Show Kind where
   show KStar = "*"
@@ -159,8 +163,8 @@ newtype ClassNm = ClassNm { unClassNm :: Id }
 instance Show ClassNm where
   show (ClassNm x) = show x
 
-instance Arbitrary ClassNm where
-  arbitrary = ClassNm <$> arbitrary
+-- instance Arbitrary ClassNm where
+--   arbitrary = ClassNm <$> arbitrary
 
 -- TODO: default implementations.
 data TypeClass =
@@ -210,6 +214,33 @@ data Type =
   | TyConstructor TypeConstructor
   deriving Generic
 
+tagOfConstructor :: Type -> Id -> Int
+tagOfConstructor (TyVariant _ _ ctors) x = indexOf ((== x) . fst) ctors
+-- tagOfConstructor (TyConstructor (TypeConstructor
+--                                   { tycon_instantiated = ty })) x =
+--   tagOfConstructor ty x
+tagOfConstructor ty _ =
+  error $ "tagOfConstructor: expected TyVariant, got " ++ show ty
+
+nameOfVariant :: Type -> Id
+nameOfVariant (TyVariant nm _ _) = nm
+-- nameOfVariant (TyConstructor (TypeConstructor
+--                                { tycon_instantiated = ty })) =
+--   nameOfVariant ty
+nameOfVariant _ = error "nameOfVariant: expected TyVariant"
+
+nameOfRecord :: Type -> Id
+nameOfRecord (TyRecord nm _ _) = nm
+-- nameOfRecord (TyConstructor (TypeConstructor
+--                               { tycon_instantiated = ty })) =
+--   nameOfRecord ty
+nameOfRecord ty = error $ "nameOfRecord: expected TyRecord, got " ++ show ty
+
+-- Get the ultimate return type (right-most type in a chain of arrows).
+returnType :: Type -> Type
+returnType (TyAbs _ _ ty) = ty
+returnType (TyArrow _ ty) = ty
+returnType ty = ty
 
 typeKindRec :: (Kind -> Kind) -> Type -> Type
 typeKindRec f (TyVar b k ctx x) = TyVar b (f k) ctx x
@@ -297,7 +328,6 @@ chopTypeConstructor (TyConstructor (TypeConstructor { tycon_name = nm
   mkTypeConstructor nm tyvars kinds (removeLast tyargs) (unTyAbs ty)
 chopTypeConstructor _ = error "chopTypeConstructor: expected TyConstructor"
 
-
 applyTypeConstructor :: Type -> Type -> Type
 applyTypeConstructor
   (TyConstructor
@@ -313,13 +343,16 @@ applyTypeConstructor
 applyTypeConstructor _ _ =
   error "applyTypeConstructor: expected TyConstructor"
 
+instantiated :: Type -> Type
+instantiated (TyConstructor (TypeConstructor { tycon_instantiated = ty })) = ty
+instantiated ty = ty
 
 -- TODO: should probably ensure that the kinds of the type variables
 -- match.
 etaReduceTypeConstructor :: Type -> Type
-etaReduceTypeConstructor (TyAbs x _
-                          t@(TyConstructor
-                             (TypeConstructor { tycon_tyargs = tyargs })))
+etaReduceTypeConstructor ty@(TyAbs x _
+                             t@(TyConstructor
+                                (TypeConstructor { tycon_tyargs = tyargs })))
   =
   if length tyargs == 0 then
     error
@@ -334,8 +367,11 @@ etaReduceTypeConstructor (TyAbs x _
         else
           error "etaReduceTypeConstructor: variable names don't match"
       _ ->
-        error $ "etaReduceTypeConstructor: expected last argument of \
-                \type constructor " ++ show t ++ " to be a TyVar"
+        ty
+        -- error $ "etaReduceTypeConstructor: expected last argument of \
+        --         \type constructor " ++ show t ++ " to be a TyVar, got "
+        -- ++ show ty
+        
 etaReduceTypeConstructor _ =
   error "etaReduceTypeConstructor: expected TyAbs around a TyConstructor"
 
@@ -604,8 +640,10 @@ data Term α =
   | TmRecord α [(Id, Term α)]
   -- info, class name, method name, type index
   | TmPlaceholder α ClassNm Id Type -- for class methods
+  -- `TmThunk _ S args` allocates a new thunk for super combinator named
+  -- S and partially applies it to arguments args.
+  | TmThunk α Id [(Id, Type)]
   deriving (Eq, Foldable, Functor, Generic, Traversable)
-
 
 -- We provide special pattern syntax for pairs even though they are
 -- implemented as variants.
@@ -620,6 +658,34 @@ data Pattern =
   | PRecord [(Id, Pattern)]
   deriving (Eq, Show)
 
+patternVars :: Pattern -> [Id]
+patternVars = \case
+  PVar x -> [x]
+  PPair p1 p2 -> nub $ patternVars p1 ++ patternVars p2
+  PConstructor _ ps -> nub $ concatMap patternVars ps
+  PRecord fields -> nub $ concatMap (patternVars . snd) fields
+  _ -> []
+
+patternVarTypes :: Pattern -> Type -> [(Id, Type)]
+patternVarTypes (PVar x) ty = [(x, ty)]
+patternVarTypes (PPair p1 p2) (TyVariant _ _ [(_, [ty1, ty2])]) =
+  nub $ patternVarTypes p1 ty1 ++ patternVarTypes p2 ty2
+patternVarTypes (PPair p1 p2) _ =
+  error "patternVarTypes: pattern/type mismatch"
+patternVarTypes (PConstructor nm ps) (TyVariant _ _ ctors) =
+  case lookup nm ctors of
+    Just tys -> nub $ concatMap (uncurry patternVarTypes) (zip ps tys)
+    Nothing -> error "patternVarTypes: pattern/type mismatch"
+patternVarTypes (PConstructor nm ps) _ =
+    error "patternVarTypes: pattern/type mismatch"
+patternVarTypes (PRecord fields) (TyRecord _ _ field_tys) =
+  nub $ concatMap (\(x, p) -> case lookup x field_tys of
+                      Just ty -> patternVarTypes p ty
+                      Nothing -> error "patternVarTypes: pattern/type mismatch")
+  fields
+patternVarTypes (PRecord fields) _ =
+  error "patternVarTypes: pattern/type mismatch"
+patternVarTypes _ _ = []
 
 -- A recursion scheme for terms.
 termRec :: (Term α -> Term α) -> Term α -> Term α
@@ -694,10 +760,71 @@ termTypeRecM f = termRecM $
       TmPlaceholder fi x y ty -> TmPlaceholder fi x y <$> f ty
       _ -> return tm
 
+
+-- -- See typeRecReader.
+-- termRecReader :: (Monoid a, MonadReader r m) => (Term α -> r -> r) ->
+--                  (Term α -> m a) -> Term α -> m a
+-- termRecReader f g tm@(TmAbs _ x _ t1) =
+--   local (f tm) $ pure (<>) <*> g tm <*> termRecReader f g t1
+-- termRecReader f g tm@(TmApp _ t1 t2) =
+--   local (f tm) $ do
+--   x <- g tm
+--   y <- termRecReader f g t1
+--   z <- termRecReader f g t2
+--   return $ x <> y <> z
+-- termRecReader f g tm@(TmIf _ t1 t2 t3) =
+--   local (f tm) $ do
+--   x <- g tm
+--   y <- termRecReader f g t1
+--   z <- termRecReader f g t2
+--   w <- termRecReader f g t3
+--   return $ x <> y <> z <> w
+-- termRecReader f g tm@(TmUnop _ _ t1) =
+--   local (f tm) $ liftM2 (<>) (g tm) (termRecReader f g t1)
+-- termRecReader f g tm@(TmBinop _ _ t1 t2) =
+--   local (f tm) $ do
+--   x <- g tm
+--   y <- termRecReader f g t1
+--   z <- termRecReader f g t2
+--   return $ x <> y <> z
+-- termRecReader f g tm@(TmLet _ _ t1 t2) =
+--   local (f tm) $ do
+--   x <- g tm
+--   y <- termRecReader f g t1
+--   z <- termRecReader f g t2
+--   return $ x <> y <> z
+-- termRecReader f g tm@(TmVariant _ _ ts) =
+--   local (f tm) $ do
+--   x <- g tm
+--   ys <- mapM (termRecReader f g) ts
+--   return $ x <> mconcat ys
+-- termRecReader f g tm@(TmMatch _ t1 cases) =
+--   local (f tm) $ do
+--   x <- g tm
+--   y <- termRecReader f g t1
+-- termRecReader f g tm = local (f tm) $ g tm
+
 -- Substitute s for t in tm
 termSubst :: Eq α => Term α -> Term α -> Term α -> Term α
 termSubst s t = termRec $ \tm -> if tm == t then s else tm
 
+-- | Gather free variables of a term.
+freevars :: Term α -> [Id]
+freevars = \case
+  TmVar _ x -> [x]
+  TmAbs _ x _ t1 -> filter (not . (== x)) $ freevars t1
+  TmApp _ t1 t2 -> nub $ freevars t1 ++ freevars t2
+  TmIf _ t1 t2 t3 -> nub $ freevars t1 ++ freevars t2 ++ freevars t3
+  TmUnop _ _ t1 -> freevars t1
+  TmBinop _ _ t1 t2 -> nub $ freevars t1 ++ freevars t2
+  TmLet _ x t1 t2 -> nub $ freevars t1 ++ filter (not . (== x)) (freevars t2)
+  TmVariant _ _ ts -> nub $ concatMap freevars ts
+  TmMatch _ t1 cases -> nub $ freevars t1 ++ concat
+    (flip fmap cases $ \(p, t) ->
+                         filter (not . (`elem` patternVars p)) $ freevars t)
+  TmRecord _ fields -> nub $ concatMap (freevars . snd) fields
+  TmThunk _ _ xs -> nub $ fst <$> xs
+  _ -> []
 -------------
 -- | Commands
 
@@ -714,6 +841,9 @@ data Command α =
   | CClass α [ClassNm] ClassNm Id [(Id, Type)]
   -- constraints, class name, instance type, method names and definitions
   | CInstance α [(Id, ClassNm)] ClassNm Type [(Id, Term α)]
+  -- Lambda-lifted let declaration with all bound variables on the
+  -- outside and no inner abstractions.
+  | CSuperCombinator α Id [(Id, Type)] (Term α)
   deriving (Functor, Generic)
 
 
@@ -776,6 +906,23 @@ propagateClassConstraintsCom constrs =
   commandTypeRec $ propagateClassConstraints constrs
 
 
+isAssertCommand :: Command α -> Bool
+isAssertCommand (CAssert _ _) = True
+isAssertCommand _ = False
+
+isEvalCommand :: Command α -> Bool
+isEvalCommand (CEval _ _) = True
+isEvalCommand _ = False
+
+isTypeCommand :: Command α -> Bool
+isTypeCommand (CData _ _ _ _) = True
+isTypeCommand (CRecord _ _ _ _) = True
+isTypeCommand _ = False
+
+isSuperCombinator :: Command α -> Bool
+isSuperCombinator (CSuperCombinator _ _ _ _) = True
+isSuperCombinator _ = False
+
 ------------
 -- | Program
 
@@ -802,8 +949,8 @@ eraseData = (<$) ()
 
 instance Show Type where
   show =
-    -- showType []
-    showTypeLight
+    showType []
+    -- showTypeLight
 
 showType :: [Id] -> Type -> String
 showType _ (TyVar b k ctx (Id s)) =
@@ -902,17 +1049,17 @@ instance Eq Type where
   _ == _ = False
 
 
-instance Arbitrary Type where
-  arbitrary = genericArbitrary' Z uniform
-  shrink (TyArrow s t) = [s, t]
-  shrink (TyRef s) = [s]
-  shrink (TyVariant _ _ ctors) =
-    concat $ concat $ shrink $ snd $ unzip ctors
-  shrink _ = []
+-- instance Arbitrary Type where
+--   arbitrary = genericArbitrary' Z uniform
+--   shrink (TyArrow s t) = [s, t]
+--   shrink (TyRef s) = [s]
+--   shrink (TyVariant _ _ ctors) =
+--     concat $ concat $ shrink $ snd $ unzip ctors
+--   shrink _ = []
 
-instance Arbitrary TypeConstructor where
-  arbitrary = genericArbitrary' Z uniform
-  shrink _ = []
+-- instance Arbitrary TypeConstructor where
+--   arbitrary = genericArbitrary' Z uniform
+--   shrink _ = []
 
 
 instance Show (Term α) where
@@ -978,6 +1125,7 @@ showTerm (TmRecord _ fields) =
 showTerm (TmPlaceholder _ classNm methodNm ty) =
   "(TmPlaceholder " ++ show classNm ++ " " ++ show methodNm ++ " "
   ++ show ty ++ ")"
+showTerm (TmThunk _ nm n) = "(TmThunk " ++ show nm ++ " " ++ show n ++ ")"
 
 showTermLight :: Term α -> String
 showTermLight (TmVar _ x) = show x
@@ -1007,6 +1155,7 @@ showTermLight (TmRecord _ fields) =
   "{" ++ intercalate ", " (show <$> (bimap show showTermLight <$> fields)) ++ "}"
 showTermLight (TmPlaceholder _ classNm methodNm ty) =
   "(PLACEHOLDER: " ++ show classNm ++ ", " ++ show methodNm ++ ", " ++ show ty ++ ")"
+showTermLight (TmThunk _ nm n) = "(thunk " ++ show nm ++ ", " ++ show n ++ ")"
 
 -- instance Show α => Show (Term α) where
 --   show (TmVar fi x)         = "(TmVar " ++ show fi ++ " " ++ show x ++ ")"
@@ -1091,7 +1240,10 @@ showCommandLight (CInstance _ constrs nm ty methods) =
   "instance " ++ intercalate " " (show <$> constrs) ++ " => " ++
   show nm ++ " " ++ show ty ++ " | " ++
   intercalate " | " (show <$> methods)
+showCommandLight (CSuperCombinator _ nm params body) =
+  "supercombinator " ++ show nm ++ " (" ++ show params ++ ") " ++ show body
 
+                   -- | CSuperCombinator α Id [(Id, Type)] (Term α)
   
 instance Show α => Show (Prog α) where
   show (Prog { prog_of = p }) =
@@ -1163,23 +1315,23 @@ binopType BOr     = TyBool
 binopType BUpdate = TyUnit
 
 data_of_term :: Term α -> α
-data_of_term t =
-  case t of
-    TmVar fi _       -> fi
-    TmAbs fi _ _ _   -> fi
-    TmApp fi _ _     -> fi
-    TmUnit fi        -> fi
-    TmBool fi _      -> fi
-    TmIf fi _ _ _    -> fi
-    TmInt fi _       -> fi
-    TmChar fi _      -> fi
-    TmUnop fi _ _    -> fi
-    TmBinop fi _ _ _ -> fi
-    TmLet fi _ _ _   -> fi
-    TmVariant fi _ _ -> fi
-    TmMatch fi _ _   -> fi
-    TmRecord fi _    -> fi
-    TmPlaceholder fi _ _ _ -> fi
+data_of_term = \case
+  TmVar fi _       -> fi
+  TmAbs fi _ _ _   -> fi
+  TmApp fi _ _     -> fi
+  TmUnit fi        -> fi
+  TmBool fi _      -> fi
+  TmIf fi _ _ _    -> fi
+  TmInt fi _       -> fi
+  TmChar fi _      -> fi
+  TmUnop fi _ _    -> fi
+  TmBinop fi _ _ _ -> fi
+  TmLet fi _ _ _   -> fi
+  TmVariant fi _ _ -> fi
+  TmMatch fi _ _   -> fi
+  TmRecord fi _    -> fi
+  TmPlaceholder fi _ _ _ -> fi
+  TmThunk fi _ _   -> fi
 
 data_of_command :: Command α -> α
 data_of_command c =
@@ -1325,8 +1477,7 @@ class FreeTyVars a where
   freetyvars :: a -> [Type]
 
 instance FreeTyVars a => FreeTyVars [a] where
-  freetyvars = nub . concat . fmap freetyvars
-
+  freetyvars = nub . concatMap freetyvars
 
 instance FreeTyVars Type where
   freetyvars = nub . flip runReader [] .

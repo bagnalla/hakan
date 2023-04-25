@@ -1,0 +1,2 @@
+pure x : ref ℤ
+def x = ref 0

@@ -1,0 +1,22 @@
+
+data List a =
+  | Nil
+  | Cons a (List a)
+
+# pure sum : [ℤ] → ℤ
+# def sum = λl.
+#   destruct l as
+#   | Nil → 0
+#   | Cons x l' → x + sum l'
+
+pure length : [a] → ℤ
+def length = λl.
+  destruct l as
+  | Nil       → 0
+  | Cons _ l' → 1 + length l'
+
+
+# pure l : [ℤ]
+# def l = Cons 1 (Cons 2 (Cons 3 Nil))
+
+run length (Cons 0 (Cons 1 Nil))

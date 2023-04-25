@@ -1,0 +1,12 @@
+record Person a =
+  { age  : ℤ
+  , male : Bool
+  , meta : a }
+
+pure getAge : Person a → ℤ
+def getAge = λ p. age p
+
+pure narcissa : Person ℤ
+def narcissa = { age = 31, male = true, meta = 0 }
+
+run getAge narcissa + 1

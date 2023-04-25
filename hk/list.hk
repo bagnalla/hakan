@@ -42,7 +42,7 @@ def concat = λ l.
 pure length : [a] → ℤ
 def length = λl.
   destruct l as
-  | Nil       → 1
+  | Nil       → 0
   | Cons _ l' → 1 + length l'
 
 pure rev : [a] → [a]

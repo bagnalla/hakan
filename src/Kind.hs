@@ -79,7 +79,7 @@ kindOfType δ (TyName x) = Symtab.get x δ
 kindOfType _ _ = return KStar
 
 
---------------------
+---------------------
 -- | Kinding contexts
 
 data KContext =
@@ -134,7 +134,6 @@ runKindCheck δ cs ty =
                                                , kctx_delta = δ }) s
       Nothing ->
         Left $ "type " ++ show ty ++ " is not well-kinded"
-
 
 kindCheck :: Type -> KindcheckM (Type, Kind, KConstrSet)
 

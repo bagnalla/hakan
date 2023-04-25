@@ -1,4 +1,8 @@
+{-# LANGUAGE LambdaCase #-}
+
 module Util where
+
+import Control.Monad (liftM2)
 
 import Data.Bifunctor
 import Data.Either
@@ -6,11 +10,11 @@ import Data.List (elemIndices, isInfixOf)
 import Data.Maybe (catMaybes, listToMaybe)
 import Debug.Trace (trace)
 
--- debugPrint :: String -> b -> b
--- debugPrint = trace
-
 debugPrint :: String -> b -> b
-debugPrint = const id
+debugPrint = trace
+
+-- debugPrint :: String -> b -> b
+-- debugPrint = const id
 
 tupleFun :: (a -> b) -> (a -> c) -> a -> (b, c)
 tupleFun f g x = (f x, g x)
@@ -38,11 +42,17 @@ mapFst3 = flip (flip trimap id) id
 bimap' :: (a -> b) -> (a, a) -> (b, b)
 bimap' f = bimap f f
 
-mapFstM :: Monad m => (a -> m c) -> (a, b) -> m (c, b)
+mapFstM :: Functor m => (a -> m c) -> (a, b) -> m (c, b)
 mapFstM f (x, y) = flip (,) y <$> f x
 
-mapSndM :: Monad m => (b -> m c) -> (a, b) -> m (a, c)
+mapSndM :: Functor m => (b -> m c) -> (a, b) -> m (a, c)
 mapSndM f (x, y) = (,) x <$> f y
+
+pairM :: Applicative m => (m a, m b) -> m (a, b)
+pairM (x, y) = pure (,) <*> x <*> y
+
+bimapM :: Applicative m => (a -> m c) -> (b -> m d) -> (a, b) -> m (c, d)
+bimapM f g = pairM . bimap f g
 
 -- Specialized to 4-tuples.
 quadmap :: (a -> e) -> (b -> f) -> (c -> g) -> (d -> h) ->
@@ -126,3 +136,24 @@ maybeAllEq xs =
     if length xs' == length xs && allEq xs' then
       head xs
     else Nothing
+
+andf :: (a -> Bool) -> (a -> Bool) -> a -> Bool
+andf f g x = f x && g x
+-- andf = ((uncurry (&&) .) .) . tupleFun
+
+orf :: (a -> Bool) -> (a -> Bool) -> a -> Bool
+orf f g x = f x || g x
+
+indexOf :: (a -> Bool) -> [a] -> Int
+indexOf = go 0
+  where
+    go :: Int -> (a -> Bool) -> [a] -> Int
+    go n f = \case
+      [] -> error "indexOf: not found"
+      (x : xs) -> if f x then n else go (n + 1) f xs
+
+elemIndex :: Eq a => [a] -> a -> Int
+elemIndex xs x = indexOf (== x) xs
+
+dup :: a -> (a, a)
+dup x = (x, x)

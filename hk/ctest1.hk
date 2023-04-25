@@ -1,0 +1,4 @@
+pure f : ℤ → ℤ
+def f = λ i. i + 1
+
+run f 5

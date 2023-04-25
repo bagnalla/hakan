@@ -1,0 +1,8 @@
+
+pure apply : (a → b) → a → b
+def apply = λ f. λ x. f x
+
+pure plus : ℤ → ℤ → ℤ
+def plus = λ n. λ m. n + m
+
+run apply (plus 1) 1

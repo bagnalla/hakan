@@ -1,0 +1,4 @@
+pure f : ℤ → ℤ → ℤ → ℤ 
+def f = λ x. λ y. λ z. x - y - z
+
+run f 5 6 7

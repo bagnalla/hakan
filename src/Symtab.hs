@@ -8,7 +8,7 @@ module Symtab (
 
 -- Use Haskell's map data structure
 import qualified Data.Map as Map
-import Test.QuickCheck
+  -- import Test.QuickCheck
 
 
 -- an Id is just a String
@@ -20,8 +20,8 @@ intToId 0 = Id "a"
 intToId 1 = Id "b"
 intToId _ = Id "c"
 
-instance Arbitrary Id where
-  arbitrary = intToId <$> choose (0, 2)
+-- instance Arbitrary Id where
+--   arbitrary = intToId <$> choose (0, 2)
 
 assocGet :: Id -> [(Id, a)] -> Maybe a
 assocGet _ [] = Nothing

@@ -1,0 +1,41 @@
+
+# Peano encoding of natural numbers.
+data Nat =
+  | Zero
+  | Succ Nat
+
+pure iszero : Nat → Bool
+def iszero = λ n.
+  destruct n as
+  | Zero → ⊤
+  | Succ _ → ⊥
+
+pure natOfInt : ℤ → Nat
+def natOfInt = λ i.
+  if i <= 0 then Zero else Succ (natOfInt (i-1))
+
+pure intOfNat : Nat → ℤ
+def intOfNat = λ n.
+  destruct n as
+  | Zero → 0
+  | Succ n' → 1 + intOfNat n'
+
+pure pred : Nat → Nat
+def pred = λ n.
+  destruct n as 
+  | Zero → Zero
+  | Succ n' → n'
+
+pure equal : Nat → Nat → Bool
+def equal = λ n. λ m.
+  if iszero n then iszero m else
+  ¬ iszero m && equal (pred n) (pred m)
+
+def n = natOfInt 51
+def m = natOfInt 50
+
+run intOfNat (pred n) # 50
+run equal n m # false
+run equal (pred n) m # true
+run equal n (Succ m) # true
+run equal (Succ n) (Succ m) # false

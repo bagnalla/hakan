@@ -4,12 +4,15 @@ import Control.Monad
 import System.Environment (getArgs)
 -- import System.IO (hGetContents)
 import Ast (Prog(..))
+import qualified C (compileProg)
 import Core (genTypeVars)
-import Interp (interpProg)
+-- import Interp (interpProg)
+import FunGen (funGen)
 import JS (compileJS)
 import Lexer (AlexPosn)
 import Parser (parseProg)
 import Preprocessor (importLines, substImports)
+import Renamer (rename)
 import Tycheck (tycheckProg, runTycheck, TyData)
 
 main :: IO ()
@@ -38,13 +41,25 @@ main = do
               Left s -> putStrLn "" >> error s
               Right (p', warnings) -> do
                 forM_ warnings putStrLn
-                let js_src = compileJS "" $ prog_of p'
                 -- putStrLn js_src
-                if length args > 1 then do
-                  putStrLn $ "Writing generated JS to " ++ (args!!1) ++ "."
-                  writeFile (args!!1) js_src else
+                if length args > 2 then
+                  case args!!1 of
+                    "js" -> do
+                      let js_src = compileJS "" $ prog_of p'
+                      putStrLn $ "Writing generated JS to " ++ (args!!2) ++ "."
+                      writeFile (args!!2) js_src
+                    "c" -> do
+                      let fungenned = funGen p'
+                      let renamed = rename fungenned
+                      let c_src = C.compileProg renamed
+                      putStrLn $ "Writing generated C to " ++ (args!!2) ++ "."
+                      writeFile (args!!2) c_src
+                    _ ->
+                      putStrLn $ "invalid argument: " ++ (show $ args!!1)
+                  else
                   return ()
-                return $ interpProg p'
+                -- return $ interpProg p'
+                return p'
 
   -- let result = parseGenOnly src'
 
