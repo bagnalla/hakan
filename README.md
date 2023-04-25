@@ -9,19 +9,18 @@ out of date.
 
 ## Instructions
 
-To build hakan and run it on a test program:
+To build hakan and run the interpreter on a test program:
 
 `stack build && stack exec hakan-exe hk/monad.hk`
 
-## Compilation to JS
+## Compilation to JavaScript
+
+[src/JS.hs](src/JS.hs) implements straightforward compilation to JavaScript. Try it out with:
 
 `./compileJS.sh hk/monad.hk`
 
 ## Compilation to C
 
-Compilation strategy based on lambda-lifting all functions to
-top-level "supercombinators", each of which is compiled to a single C
-function. Currently doesn't support the use of typeclasses. Hooks up
-the resulting executable to to Boehm GC.
+[src/C.hs](src/C.hs) implements compilation to C. It is less straightforward than the JS backend because of C's lack of innate support for higher-order functions / closures, and lack of garbage collection. Compilation proceeds by lambda-lifting all functions to top-level "supercombinators" which are then compiled to individual C functions. Currently doesn't support the use of typeclasses. The resulting executable is hooked up to Boehm GC.
 
 `./compileC.sh hk/ctest9.hk`
