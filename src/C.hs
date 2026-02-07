@@ -295,8 +295,13 @@ mkMalloc' :: Type -> CExpr
 mkMalloc' ty =
   let (ct, ds) = typeToC ty in
     mkMalloc $ CSizeofType (C.CDecl [CTypeSpec ct]
-                            [(Just $ CDeclr Nothing ds Nothing [] nil,
+                            [(Just $ CDeclr Nothing (dropPtr ds) Nothing [] nil,
                               Nothing, Nothing)] nil) nil
+  where
+    -- For heap allocation we want the pointee size (for example `List`,
+    -- not `List*`). Most runtime heap values are represented as pointers.
+    dropPtr (CPtrDeclr _ _ : rest) = rest
+    dropPtr ds = ds
 
 mkBigAnd :: [CExpr] -> CExpr
 mkBigAnd [] = mkBoolConst True
@@ -570,15 +575,15 @@ patternPred (PInt i) e = return $ CBinary CEqOp (mkIntConst i) e nil
 patternPred (PChar c) e = return $ CBinary CEqOp (mkCharConst c) e nil
 patternPred (PPair p1 p2) e =
   pure (CBinary CLndOp) <*>
-  patternPred p1 (CMember (CMember e (mkIdent "x0") True nil)
+  patternPred p1 (CMember (CMember e (mkIdent "Pair") True nil)
                    (mkIdent "x0") False nil) <*>
-  patternPred p2 (CMember (CMember e (mkIdent "x0") True nil)
+  patternPred p2 (CMember (CMember e (mkIdent "Pair") True nil)
                    (mkIdent "x1") False nil) <*>
   pure nil
 patternPred (PConstructor (Id nm) ps) e = do
   tag <- getTag nm
   conds <- forM (zip [0..] ps) $ \(i, p) -> patternPred p $
-    CMember e (mkIdent $ "x" ++ show i) False nil
+    CMember (CMember e (mkIdent nm) True nil) (mkIdent $ "x" ++ show i) False nil
   return $ mkBigAnd $ CBinary CEqOp (CMember e (mkIdent "tag") True nil)
     (mkIntConst tag) nil : conds
 patternPred (PRecord fields) e = do
@@ -632,6 +637,10 @@ mkCFun nm body =
 compileCommand :: Command TyData -> CM [CExternalDeclaration NodeInfo]
 compileCommand = \case
   c@(CEval _ _) -> do
+    modify $ \s -> s { main_coms = main_coms s ++ [c] }
+    return []
+
+  c@(CAssert _ _) -> do
     modify $ \s -> s { main_coms = main_coms s ++ [c] }
     return []
   
@@ -823,7 +832,7 @@ compileMainCommand (CAssert (TyData ty) tm) = do
   return $ (CBlockDecl $ mkVarDecl ty x) :
     s ++ [CBlockStmt $ CIf (CUnary CNegOp (mkVar x) nil)
            (CCompound [] [CBlockStmt $ CExpr 
-                           (Just $ mkPrintf "failed assertion: %d\n"
+                           (Just $ mkPrintf "failed assertion: %s\n"
                              [mkStringConst $ show tm]) nil,
                            CBlockStmt $ CExpr (Just $ mkExit $ -1) nil] nil)
            Nothing nil]

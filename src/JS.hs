@@ -298,6 +298,7 @@ patternJSPredicate p =
 
 
 patternJSBindings :: Pattern -> JSExpression -> JSM [JSStatement]
+patternJSBindings (PVar (Id "_")) _ = return []
 patternJSBindings (PVar (Id x)) e = do
   x' <- process_ident x
   return [mkVarStmt x' e]
@@ -312,8 +313,10 @@ patternJSBindings (PPair p1 p2) e = do
 patternJSBindings (PConstructor _ ps) e =
   concat <$> (mapM (\(p, i) -> patternJSBindings p $ indexJS e i) $
               zip ps [0..])
-patternJSBindings (PRecord fps) e = undefined
-  -- concat $ (undefined) <$> fps
+patternJSBindings (PRecord fps) e =
+  concat <$> mapM
+    (\(Id x, p) -> patternJSBindings p $ propertyJS e x)
+    fps
 
 
 -- data Pattern =
@@ -383,13 +386,23 @@ commandToJS (CRecord _ _ _ fields) = do
            x' <- process_ident x
            return $ mkVarStmt x' (  JSFunctionExpression space JSIdentNone nil
                (JSLOne $ JSIdentifier nil "x") nil
-               (JSBlock nil [JSReturn nil
-                             (Just $ JSMemberDot (JSIdentifier nil "x")
-                              nil (JSIdentifier nil x'))
-                              semi] nil)
+               (JSBlock nil
+                 [mkReturn
+                   (JSMemberDot (JSIdentifier nil "x")
+                    nil
+                    (JSIdentifier nil x'))]
+                 nil)
                                  )) fields
 
-commandToJS (CAssert _ tm) = undefined -- TODO
+commandToJS (CAssert _ tm) = do
+  tm' <- termToJS tm
+  let exitCall =
+        JSCallExpression
+        (JSMemberDot (JSIdentifier nil "process") nil (JSIdentifier nil "exit"))
+        nil
+        (JSLOne $ intToJS (-1))
+        nil
+  return [JSExpressionStatement (JSExpressionTernary tm' nil unitJS nil exitCall) semi]
 
 commandToJS (CClass _ _ _ _ _) = return []
 

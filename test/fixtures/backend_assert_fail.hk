@@ -1,0 +1,6 @@
+# EXPECT: OK
+# EXPECT-JS-STATUS: ERROR
+# EXPECT-C-STATUS: ERROR
+
+assert 1 = 2
+run 0

@@ -1,0 +1,11 @@
+# EXPECT: OK
+# EXPECT-JS-OUT: 1
+# EXPECT-C-OUT: 1
+
+data Result =
+  | R Int Int
+
+run destruct (R 2 7) as
+  | R 2 7 -> 1
+  | R 2 8 -> 2
+  | R _ _ -> 3

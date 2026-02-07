@@ -1,0 +1,6 @@
+# EXPECT: OK
+# EXPECT-JS-OUT: 9
+# EXPECT-C-OUT: 9
+
+assert 2 = 2
+run 9

@@ -3,3 +3,9 @@ test/fixtures/backend_if.hk
 test/fixtures/backend_let.hk
 test/fixtures/backend_data_match.hk
 test/fixtures/backend_import_id.hk
+test/fixtures/backend_nested_match.hk
+test/fixtures/backend_assert.hk
+test/fixtures/backend_record_proj.hk
+test/fixtures/backend_ctor_literal_args.hk
+test/fixtures/backend_record_destruct_bind.hk
+test/fixtures/backend_assert_fail.hk

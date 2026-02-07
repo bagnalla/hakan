@@ -1,8 +1,0 @@
-# Known parity-gap case (currently excluded from backend_cases.txt):
-# JS returns 3; C currently returns 1.
-# EXPECT: OK
-# EXPECT-JS-OUT: 3
-# EXPECT-C-OUT: 3
-
-import hk/base
-run length (Cons 1 (Cons 2 (Cons 3 Nil)))

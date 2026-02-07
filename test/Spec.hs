@@ -20,9 +20,22 @@ data ExpectedStatus =
   | ExpectError (Maybe String)
   deriving Show
 
+data RunStatus =
+  RunOk
+  | RunError
+  deriving (Eq, Show)
+
+data ExecResult = ExecResult
+  { execCode :: ExitCode
+  , execStdout :: String
+  , execStderr :: String
+  } deriving Show
+
 data Expectations = Expectations
   { expectedStatus :: ExpectedStatus
   , expectedValue :: Maybe String
+  , expectedJSStatus :: RunStatus
+  , expectedCStatus :: RunStatus
   , expectedJSOut :: Maybe String
   , expectedCOut :: Maybe String
   } deriving Show
@@ -31,6 +44,8 @@ defaultExpectations :: Expectations
 defaultExpectations = Expectations
   { expectedStatus = ExpectOk
   , expectedValue = Nothing
+  , expectedJSStatus = RunOk
+  , expectedCStatus = RunOk
   , expectedJSOut = Nothing
   , expectedCOut = Nothing
   }
@@ -40,6 +55,9 @@ casesFile = "test/fixtures/cases.txt"
 
 backendCasesFile :: FilePath
 backendCasesFile = "test/fixtures/backend_cases.txt"
+
+backendKnownFailCCasesFile :: FilePath
+backendKnownFailCCasesFile = "test/fixtures/backend_known_fail_c_cases.txt"
 
 main :: IO ()
 main = do
@@ -58,12 +76,22 @@ main = do
 
 runBackendSuites :: IO [String]
 runBackendSuites = do
-  exists <- doesFileExist backendCasesFile
-  if not exists then return [] else do
-    casePaths <- loadCasePaths backendCasesFile
-    jsFailures <- runBackendSuite "JS" ["stack", "node"] (runJSCase casePaths)
-    cFailures <- runBackendSuite "C" ["stack", "gcc"] (runCCase casePaths)
-    return $ jsFailures ++ cFailures
+  normalFailures <- do
+    exists <- doesFileExist backendCasesFile
+    if not exists then return [] else do
+      casePaths <- loadCasePaths backendCasesFile
+      jsFailures <- runBackendSuite "JS" ["stack", "node"] (runJSCase casePaths)
+      cFailures <- runBackendSuite "C" ["stack", "gcc"] (runCCase casePaths)
+      return $ jsFailures ++ cFailures
+  knownFailFailures <- do
+    exists <- doesFileExist backendKnownFailCCasesFile
+    if not exists then return [] else do
+      casePaths <- loadCasePaths backendKnownFailCCasesFile
+      runBackendSuite
+        "C-known-fail"
+        ["stack", "node", "gcc"]
+        (runKnownFailCCase casePaths)
+  return $ normalFailures ++ knownFailFailures
 
 runBackendSuite :: String -> [String] -> IO [Maybe String] -> IO [String]
 runBackendSuite name deps runCases = do
@@ -93,59 +121,134 @@ missingExecutables = fmap catMaybes . mapM missingExecutable
 runJSCase :: [FilePath] -> IO [Maybe String]
 runJSCase = mapM runOne
   where
-    jsOutPath = "/tmp/hakan_backend_test.js"
     runOne path = do
       src <- readFile path
       let ex = parseExpectations src
-      case expectedJSOut ex of
-        Nothing -> return $ Just $ path ++ ": missing EXPECT-JS-OUT directive."
-        Just expectedOut -> do
-          compiled <- runCmd "stack" ["exec", "hakan-exe", path, "js", jsOutPath]
-          case compiled of
-            Left e -> return $ Just $ path ++ ": JS compile failed:\n" ++ e
-            Right () -> do
-              ran <- runCmdOut "node" [jsOutPath]
-              case ran of
-                Left e -> return $ Just $ path ++ ": JS run failed:\n" ++ e
-                Right actual ->
-                  if trim actual == trim expectedOut then
-                    return Nothing
-                  else
-                    return $ Just $
-                      path ++ ": JS output mismatch. expected " ++ show expectedOut ++
-                      ", got " ++ show (trim actual)
+      case expectedJSStatus ex of
+        RunOk ->
+          case expectedJSOut ex of
+            Nothing -> return $ Just $ path ++ ": missing EXPECT-JS-OUT directive."
+            Just expectedOut ->
+              expectBackendRun "JS" path RunOk (Just expectedOut) =<< runJSExec path
+        RunError ->
+          expectBackendRun "JS" path RunError (expectedJSOut ex) =<< runJSExec path
 
 runCCase :: [FilePath] -> IO [Maybe String]
 runCCase = mapM runOne
   where
-    cOutPath = "/tmp/hakan_backend_test.c"
-    cBinPath = "/tmp/hakan_backend_test.bin"
     runOne path = do
       src <- readFile path
       let ex = parseExpectations src
-      case expectedCOut ex of
-        Nothing -> return $ Just $ path ++ ": missing EXPECT-C-OUT directive."
-        Just expectedOut -> do
-          compiled <- runCmd "stack" ["exec", "hakan-exe", path, "c", cOutPath]
-          case compiled of
-            Left e -> return $ Just $ path ++ ": C compile failed:\n" ++ e
-            Right () -> do
-              built <- runCmd
-                "gcc"
-                ["-g", "-I", "out", cOutPath, "-no-pie", "out/gc.a", "-o", cBinPath]
-              case built of
-                Left e -> return $ Just $ path ++ ": C build failed:\n" ++ e
-                Right () -> do
-                  ran <- runCmdOut cBinPath []
-                  case ran of
-                    Left e -> return $ Just $ path ++ ": C run failed:\n" ++ e
-                    Right actual ->
-                      if trim actual == trim expectedOut then
-                        return Nothing
-                      else
-                        return $ Just $
-                          path ++ ": C output mismatch. expected " ++ show expectedOut ++
-                          ", got " ++ show (trim actual)
+      case expectedCStatus ex of
+        RunOk ->
+          case expectedCOut ex of
+            Nothing -> return $ Just $ path ++ ": missing EXPECT-C-OUT directive."
+            Just expectedOut ->
+              expectBackendRun "C" path RunOk (Just expectedOut) =<< runCExec path
+        RunError ->
+          expectBackendRun "C" path RunError (expectedCOut ex) =<< runCExec path
+
+runKnownFailCCase :: [FilePath] -> IO [Maybe String]
+runKnownFailCCase = mapM runOne
+  where
+    runOne path = do
+      src <- readFile path
+      let ex = parseExpectations src
+      case (expectedJSOut ex, expectedCOut ex) of
+        (Nothing, _) ->
+          return $ Just $ path ++ ": missing EXPECT-JS-OUT directive."
+        (_, Nothing) ->
+          return $ Just $ path ++ ": missing EXPECT-C-OUT directive."
+        (Just jsExpected, Just cExpected) -> do
+          jsResult <- runJSExec path
+          jsFailure <- expectBackendRun "JS" path RunOk (Just jsExpected) jsResult
+          case jsFailure of
+            Just msg ->
+              return $ Just $
+                "known-fail C case has broken JS baseline (" ++ path ++ "):\n" ++ msg
+            Nothing -> do
+              cResult <- runCExec path
+              case cResult of
+                Left _ ->
+                  return Nothing
+                Right cExec ->
+                  if execCode cExec == ExitSuccess &&
+                     trim (execStdout cExec) == trim cExpected then
+                    return $ Just $
+                      path ++ ": known-fail C case now matches expected output; " ++
+                      "promote it to test/fixtures/backend_cases.txt"
+                  else
+                    return Nothing
+
+expectBackendRun
+  :: String
+  -> FilePath
+  -> RunStatus
+  -> Maybe String
+  -> Either String ExecResult
+  -> IO (Maybe String)
+expectBackendRun backend path expectedStatus expectedOut result =
+  case result of
+    Left e ->
+      return $ Just $ path ++ ": " ++ backend ++ " run failed:\n" ++ e
+    Right exec ->
+      case expectedStatus of
+        RunOk ->
+          case execCode exec of
+            ExitSuccess ->
+              case expectedOut of
+                Nothing ->
+                  return $ Just $
+                    path ++ ": " ++ backend ++ " expected output directive is missing."
+                Just wanted ->
+                  if trim (execStdout exec) == trim wanted then
+                    return Nothing
+                  else
+                    return $ Just $
+                      path ++ ": " ++ backend ++ " output mismatch. expected " ++
+                      show wanted ++ ", got " ++ show (trim $ execStdout exec)
+            ExitFailure _ ->
+              return $ Just $
+                path ++ ": " ++ backend ++ " expected success but failed:\n" ++
+                renderExecResult exec
+        RunError ->
+          case execCode exec of
+            ExitSuccess ->
+              return $ Just $
+                path ++ ": " ++ backend ++ " expected runtime failure but succeeded."
+            ExitFailure _ ->
+              case expectedOut of
+                Nothing -> return Nothing
+                Just wanted ->
+                  if trim (execStdout exec) == trim wanted then
+                    return Nothing
+                  else
+                    return $ Just $
+                      path ++ ": " ++ backend ++ " failure output mismatch. expected " ++
+                      show wanted ++ ", got " ++ show (trim $ execStdout exec)
+
+runJSExec :: FilePath -> IO (Either String ExecResult)
+runJSExec path = do
+  let jsOutPath = "/tmp/hakan_backend_test.js"
+  compiled <- runCmd "stack" ["exec", "hakan-exe", path, "js", jsOutPath]
+  case compiled of
+    Left e -> return $ Left $ "JS compile failed:\n" ++ e
+    Right () -> Right <$> runCmdCapture "node" [jsOutPath]
+
+runCExec :: FilePath -> IO (Either String ExecResult)
+runCExec path = do
+  let cOutPath = "/tmp/hakan_backend_test.c"
+  let cBinPath = "/tmp/hakan_backend_test.bin"
+  compiled <- runCmd "stack" ["exec", "hakan-exe", path, "c", cOutPath]
+  case compiled of
+    Left e -> return $ Left $ "C compile failed:\n" ++ e
+    Right () -> do
+      built <- runCmd
+        "gcc"
+        ["-g", "-I", "out", cOutPath, "-no-pie", "out/gc.a", "-o", cBinPath]
+      case built of
+        Left e -> return $ Left $ "C build failed:\n" ++ e
+        Right () -> Right <$> runCmdCapture cBinPath []
 
 runCmd :: FilePath -> [String] -> IO (Either String ())
 runCmd prog args = do
@@ -163,21 +266,26 @@ runCmd prog args = do
           , err
           ]
 
-runCmdOut :: FilePath -> [String] -> IO (Either String String)
-runCmdOut prog args = do
+runCmdCapture :: FilePath -> [String] -> IO ExecResult
+runCmdCapture prog args = do
   res <- readProcessWithExitCode prog args ""
   case res of
-    (ExitSuccess, out, _) -> return $ Right out
-    (ExitFailure code, out, err) ->
-      return $ Left $
-        unlines
-          [ "exit code: " ++ show code
-          , "command: " ++ unwords (prog : args)
-          , "stdout:"
-          , out
-          , "stderr:"
-          , err
-          ]
+    (code, out, err) ->
+      return ExecResult
+        { execCode = code
+        , execStdout = out
+        , execStderr = err
+        }
+
+renderExecResult :: ExecResult -> String
+renderExecResult exec =
+  unlines
+    [ "exit code: " ++ show (execCode exec)
+    , "stdout:"
+    , execStdout exec
+    , "stderr:"
+    , execStderr exec
+    ]
 
 runCase :: FilePath -> IO (Maybe String)
 runCase path = do
@@ -238,6 +346,16 @@ parseDirective ex line =
     Just body
       | "EXPECT-VALUE:" `isPrefixOfCI` body ->
           ex { expectedValue = Just $ trim $ dropPrefix "EXPECT-VALUE:" body }
+      | "EXPECT-JS-STATUS:" `isPrefixOfCI` body ->
+          ex { expectedJSStatus =
+                 parseRunStatus (expectedJSStatus ex) $
+                 trim $ dropPrefix "EXPECT-JS-STATUS:" body
+             }
+      | "EXPECT-C-STATUS:" `isPrefixOfCI` body ->
+          ex { expectedCStatus =
+                 parseRunStatus (expectedCStatus ex) $
+                 trim $ dropPrefix "EXPECT-C-STATUS:" body
+             }
       | "EXPECT-JS-OUT:" `isPrefixOfCI` body ->
           ex { expectedJSOut = Just $ trim $ dropPrefix "EXPECT-JS-OUT:" body }
       | "EXPECT-C-OUT:" `isPrefixOfCI` body ->
@@ -260,6 +378,17 @@ parseExpectStatus ex raw =
     "ERROR" -> ex { expectedStatus = ExpectError Nothing }
     "FAIL" -> ex { expectedStatus = ExpectError Nothing }
     _ -> ex
+
+parseRunStatus :: RunStatus -> String -> RunStatus
+parseRunStatus fallback raw =
+  case map toUpper raw of
+    "OK" -> RunOk
+    "SUCCESS" -> RunOk
+    "PASS" -> RunOk
+    "ERROR" -> RunError
+    "FAIL" -> RunError
+    "FAILURE" -> RunError
+    _ -> fallback
 
 loadCasePaths :: FilePath -> IO [FilePath]
 loadCasePaths path = do

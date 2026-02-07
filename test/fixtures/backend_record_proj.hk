@@ -1,0 +1,12 @@
+# EXPECT: OK
+# EXPECT-JS-OUT: 42
+# EXPECT-C-OUT: 42
+
+record Person a =
+  { age : Int
+  , alive : Bool
+  , meta : a }
+
+def p = { age = 8, alive = true, meta = 34 }
+
+run age p + meta p

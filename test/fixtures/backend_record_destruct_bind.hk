@@ -1,0 +1,12 @@
+# EXPECT: OK
+# EXPECT-JS-OUT: 9
+# EXPECT-C-OUT: 9
+
+record Person =
+  { age : Int
+  , alive : Bool }
+
+def p = { age = 9, alive = true }
+
+run destruct p as
+  | { age = a, alive = flag } -> if flag then a else 0

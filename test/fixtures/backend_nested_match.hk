@@ -1,0 +1,14 @@
+# EXPECT: OK
+# EXPECT-JS-OUT: 1
+# EXPECT-C-OUT: 1
+
+# Regression: nested pattern match over recursive constructor field.
+data List =
+  | Nil
+  | Cons Int List
+
+run destruct (Cons 1 (Cons 2 Nil)) as
+  | Cons _ t ->
+      destruct t as
+      | Nil -> 0
+      | Cons _ _ -> 1
