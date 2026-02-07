@@ -220,7 +220,7 @@ tycheckTerm (TmLet fi x tm1 tm2) = do
   (tm1', c1) <- tycheckTerm tm1
   tryUnify fi c1 $
     \tsubst -> do
-      (gen, tyscheme) <- process_term fi tsubst tm1'
+      (gen, tyscheme) <- process_term fi False tsubst tm1'
       (tm2', c2) <- local (updGamma $ add x tyscheme) $
                     tycheckTerm tm2
       let c = c1 ++ c2
@@ -342,7 +342,7 @@ tycheckCommand (CEval fi tm) = do
   (tm', c) <- tycheckTerm tm
   tryUnify fi c $
     \tsubst -> do
-      (gen, _) <- process_term fi tsubst tm'
+      (gen, _) <- process_term fi False tsubst tm'
       return $ CEval (mkData $ ty_of_term gen) gen
   
 tycheckCommand (CData _ nm tyvars ctors) =
@@ -477,13 +477,14 @@ tycheckCommands (com:coms) = do
           -- be inlined for concrete known types.
           tsubst <- unify_tyschemes (data_of_command com)
                     (mkTypeScheme' [] False $ ty_of_term tm) declTyscheme
-          (gen, tyscheme) <- process_term fi tsubst tm
+          let declConstrs = flattenThird $ varsOfTypeScheme declTyscheme
+          (gen, tyscheme) <- process_term fi (not $ null declConstrs) tsubst tm
           coms' <- local (updGamma $ const $
                           add x declTyscheme γ) $
                    tycheckCommands coms
           return $ CLet fi' x gen : coms'
         Nothing -> do
-          (gen, tyscheme) <- process_term fi [] tm
+          (gen, tyscheme) <- process_term fi False [] tm
           coms' <- local (updGamma $ const $
                            add x tyscheme γ) $
                    tycheckCommands coms
@@ -979,6 +980,16 @@ get_typescheme_constraints ctx = termRec2 $
         Nothing -> []
     _ -> []
 
+used_dict_constraints :: [(Id, Kind, ClassNm)] -> Term TyData -> [(Id, Kind, ClassNm)]
+used_dict_constraints constrs tm =
+  filter (\(var, _, classNm) -> mkDictId classNm var `elem` usedVars) constrs
+  where
+    usedVars = nub $ termRec2 collect tm
+    collect term =
+      case term of
+        TmVar _ x -> [x]
+        _ -> []
+
 
 -- The old approach was to pass around unapplied instance dictionaries
 -- and only assemble complete dictionaries at method use sites. Now,
@@ -1028,12 +1039,16 @@ generalize_term ctx constrs tm =
       (tm', tyscheme)
 
 
-process_term :: Show α => α -> TypeSubst -> Term TyData -> TycheckM (Term TyData, TypeScheme)
-process_term fi tsubst tm = do
+process_term :: Show α => α -> Bool -> TypeSubst -> Term TyData ->
+                TycheckM (Term TyData, TypeScheme)
+process_term fi keepAllConstrs tsubst tm = do
   ctx <- ask
   let tm' = tysubstAll' tsubst <$> tysubstAll' tsubst tm
   let spec = specialize_term ctx tm'
   let (_, filled) = fill_placeholders ctx spec
-  let constrs = flattenThird $ all_class_constraints (ty_of_term spec)
+  let allConstrs = flattenThird $ all_class_constraints (ty_of_term spec)
+  let constrs =
+        if keepAllConstrs then allConstrs
+        else used_dict_constraints allConstrs filled
   let (gen, tyscheme) = generalize_term ctx constrs filled
   return (gen, tyscheme)

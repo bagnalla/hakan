@@ -1,0 +1,14 @@
+# EXPECT: OK
+# EXPECT-JS-OUT: 5
+# EXPECT-C-OUT: 5
+
+class a is Eq
+  | eq : a -> a -> Bool
+
+instance Int is Eq
+  | eq = λx. λy. x = y
+
+pure scoreEq : a is Eq => a -> a -> Int
+def scoreEq = λx. λy. if eq x y then 2 else 1
+
+run scoreEq 1 1 + scoreEq 1 2 + scoreEq 3 3

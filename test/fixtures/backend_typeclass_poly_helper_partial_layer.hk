@@ -1,0 +1,23 @@
+# EXPECT: OK
+# EXPECT-JS-OUT: 6
+# EXPECT-C-OUT: 6
+
+class a is Eq
+  | eq : a -> a -> Bool
+
+instance Int is Eq
+  | eq = λx. λy. x = y
+
+pure scoreEq : a is Eq => a -> a -> Int
+def scoreEq = λx. λy. if eq x y then 2 else 1
+
+pure useFull : (Int -> Int -> Int) -> Int
+def useFull = λf. f 4 4
+
+pure usePartial : (Int -> Int -> Int) -> Int
+def usePartial = λf. let g = f 4 in g 5
+
+pure throughLayer : (Int -> Int -> Int) -> Int
+def throughLayer = λf. useFull f + usePartial f
+
+run throughLayer scoreEq + useFull scoreEq + usePartial scoreEq

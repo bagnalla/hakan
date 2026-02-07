@@ -1,0 +1,7 @@
+# EXPECT: OK
+# EXPECT-JS-OUT: 8
+# EXPECT-C-OUT: 8
+
+import test/fixtures/modules/typeclass_adt_pipeline
+
+run moduleScore (Sample 2) (Sample 2) + moduleScore (Sample 2) (Sample 9) + moduleScore Missing (Sample 1)

@@ -1,0 +1,30 @@
+class a is Eq
+  | eq : a -> a -> Bool
+
+instance Int is Eq
+  | eq = λx. λy. x = y
+
+class a is Eq => a is Score
+  | score : a -> a -> Int
+
+instance Int is Score
+  | score = λx. λy. if eq x y then 7 else 1
+
+data Measure =
+  | Sample Int
+  | Missing
+
+pure withScore : a is Score => (a -> a -> Int) -> a -> a -> Int
+def withScore = λf. λx. λy. f x y
+
+pure scoreMeasure : (Int -> Int -> Int) -> Measure -> Measure -> Int
+def scoreMeasure = λf. λmx. λmy.
+  destruct mx as
+  | Sample x ->
+      (destruct my as
+      | Sample y -> withScore f x y
+      | Missing -> 0)
+  | Missing -> 0
+
+pure moduleScore : Measure -> Measure -> Int
+def moduleScore = λmx. λmy. scoreMeasure score mx my

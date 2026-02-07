@@ -1,0 +1,21 @@
+# EXPECT: OK
+# EXPECT-JS-OUT: 1
+# EXPECT-C-OUT: 1
+
+class a is Eq
+  | eq : a -> a -> Bool
+
+instance Int is Eq
+  | eq = λx. λy. x = y
+
+data Box =
+  | Box Int
+  | Empty
+
+pure unboxOr : Int -> Box -> Int
+def unboxOr = λfallback. λb.
+  destruct b as
+  | Box x -> x
+  | Empty -> fallback
+
+run if eq (unboxOr 0 (Box 3)) 3 then 1 else 0

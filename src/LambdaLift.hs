@@ -76,7 +76,8 @@ lambdaLift = \case
       -- (which we don't know in the general case given an arbitrary
       -- element of function type).
       -- return $ mkApp (TmThunk fi (Id nm) $ toInteger $ length fvs + 1) $ TmVar fi . fst <$> fvs
-        return $ TmThunk fi (Id nm) fvs
+        let thunkTy = TyArrow ty (unTyData $ data_of_term t1')
+        return $ TmThunk (TyData thunkTy) (Id nm) fvs
   TmApp fi t1 t2 -> liftM2 (TmApp fi) (lambdaLift t1) (lambdaLift t2)
   TmIf fi t1 t2 t3 ->
     liftM3 (TmIf fi) (lambdaLift t1) (lambdaLift t2) (lambdaLift t3)
@@ -110,6 +111,12 @@ lambdaLiftCommand c@(CLet (TyData ty) nm tm) =
   -- tell $ [CSuperCombinator fi nm [] tm']
   -- return Nothing
   return $ Just $ CSuperCombinator (TyData ty) nm [] tm'
+lambdaLiftCommand (CEval d tm) = do
+  tm' <- lambdaLift tm
+  return $ Just $ CEval d tm'
+lambdaLiftCommand (CAssert d tm) = do
+  tm' <- lambdaLift tm
+  return $ Just $ CAssert d tm'
 lambdaLiftCommand c =
   -- debugPrint ("lambda lifting command: " ++ show c) $
   return $ Just c

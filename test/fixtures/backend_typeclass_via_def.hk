@@ -1,0 +1,14 @@
+# EXPECT: OK
+# EXPECT-JS-OUT: 7
+# EXPECT-C-OUT: 7
+
+class a ∈ Eq
+  | eq : a -> a -> Bool
+
+instance Int ∈ Eq
+  | eq = λx. λy. x = y
+
+pure eqInt : Int -> Int -> Bool
+def eqInt = eq
+
+run if eqInt 1 1 then 7 else 9

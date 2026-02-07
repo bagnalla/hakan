@@ -185,7 +185,7 @@ termToJS (TmIf _ tm1 tm2 tm3) = do
   tm1' <- termToJS tm1
   tm2' <- termToJS tm2
   tm3' <- termToJS tm3
-  return $ JSExpressionTernary tm1' nil tm2' nil tm3'
+  return $ JSExpressionParen nil (JSExpressionTernary tm1' nil tm2' nil tm3') nil
 
 termToJS (TmUnop _ u tm) =
   pure (JSUnaryExpression $ unopToJS u) <*> termToJS tm
@@ -199,7 +199,7 @@ termToJS (TmBinop _ b tm1 tm2) = do
     BDiv ->
       return $ JSUnaryExpression (JSUnaryOpTilde nil)
       (JSUnaryExpression (JSUnaryOpTilde nil) $ JSExpressionParen nil e nil)
-    _ -> return e
+    _ -> return $ JSExpressionParen nil e nil
 
 termToJS (TmLet _ (Id x) tm1 tm2) = do
   x' <- process_ident x

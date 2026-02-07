@@ -1,0 +1,23 @@
+# EXPECT: OK
+# EXPECT-JS-OUT: 13
+# EXPECT-C-OUT: 13
+
+class a is Eq
+  | eq : a -> a -> Bool
+
+instance Int is Eq
+  | eq = λx. λy. x = y
+
+class a is Eq => a is Ord
+  | leq : a -> a -> Bool
+
+instance Int is Ord
+  | leq = λx. λy. x <= y
+
+class a is Ord => a is Ranked
+  | better : a -> a -> Bool
+
+instance Int is Ranked
+  | better = λx. λy. leq x y && eq y y
+
+run if better 2 3 then 13 else 0

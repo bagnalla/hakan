@@ -1,0 +1,20 @@
+class a is Eq
+  | eq : a -> a -> Bool
+
+instance Int is Eq
+  | eq = λx. λy. x = y
+
+class a is Eq => a is Ord
+  | leq : a -> a -> Bool
+
+instance Int is Ord
+  | leq = λx. λy. x <= y
+
+class a is Ord => a is Ranked
+  | better : a -> a -> Bool
+
+instance Int is Ranked
+  | better = λx. λy. leq x y && eq y y
+
+pure rankScore : Int -> Int -> Int
+def rankScore = λx. λy. if better x y then 8 else 0

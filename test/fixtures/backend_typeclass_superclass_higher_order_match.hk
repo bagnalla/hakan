@@ -1,0 +1,39 @@
+# EXPECT: OK
+# EXPECT-JS-OUT: 4
+# EXPECT-C-OUT: 4
+
+class a is Eq
+  | eq : a -> a -> Bool
+
+instance Int is Eq
+  | eq = λx. λy. x = y
+
+class a is Eq => a is Ord
+  | leq : a -> a -> Bool
+
+instance Int is Ord
+  | leq = λx. λy. x <= y
+
+class a is Ord => a is Ranked
+  | score : a -> a -> Int
+
+instance Int is Ranked
+  | score = λx. λy. if leq x y && eq y y then 3 else 1
+
+data MaybeInt =
+  | Some Int
+  | No
+
+pure withScoreOnMaybe : (Int -> Int -> Int) -> MaybeInt -> MaybeInt -> Int
+def withScoreOnMaybe = λf. λleft. λright.
+  destruct left as
+  | Some x ->
+      (destruct right as
+      | Some y -> f x y
+      | No -> 0)
+  | No -> 0
+
+pure rankedMaybe : MaybeInt -> MaybeInt -> Int
+def rankedMaybe = λleft. λright. withScoreOnMaybe score left right
+
+run rankedMaybe (Some 2) (Some 3) + rankedMaybe (Some 9) (Some 2) + rankedMaybe No (Some 1)

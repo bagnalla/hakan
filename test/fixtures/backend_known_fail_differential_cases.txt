@@ -1,0 +1,2 @@
+# Differential known-fail fixtures.
+# Keep this list empty when all tracked differential fixtures are green.

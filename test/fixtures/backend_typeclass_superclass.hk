@@ -1,0 +1,17 @@
+# EXPECT: OK
+# EXPECT-JS-OUT: 11
+# EXPECT-C-OUT: 11
+
+class a is Eq
+  | eq : a -> a -> Bool
+
+instance Int is Eq
+  | eq = λx. λy. x = y
+
+class a is Eq => a is Ord
+  | leq : a -> a -> Bool
+
+instance Int is Ord
+  | leq = λx. λy. x <= y
+
+run if leq 2 3 && eq 4 4 then 11 else 0

@@ -1,0 +1,7 @@
+# EXPECT: OK
+# EXPECT-JS-OUT: 8
+# EXPECT-C-OUT: 8
+
+import test/fixtures/modules/typeclass_hierarchy
+
+run rankScore 2 3 + rankScore 4 2

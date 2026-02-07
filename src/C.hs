@@ -381,6 +381,27 @@ lookupVar x = do
     Just (Right y) -> return $ mkVar y
     Nothing -> return $ mkVar x
 
+appResultType :: Type -> Type -> Type
+appResultType funTy fallback = case normalize_ty (instantiated funTy) of
+  TyArrow _ t -> t
+  TyAbs _ _ t -> appResultType t fallback
+  _ -> fallback
+
+isFunctionType :: Type -> Bool
+isFunctionType ty = case normalize_ty (instantiated ty) of
+  TyArrow _ _ -> True
+  TyAbs _ _ t -> isFunctionType t
+  _ -> False
+
+inferTermType :: Term TyData -> Type
+inferTermType tm = case tm of
+  TmApp (TyData ty) t1 _ ->
+    let inferred = appResultType (inferTermType t1) ty in
+      if isFunctionType ty then ty
+      else if isFunctionType inferred then inferred
+      else ty
+  _ -> unTyData $ data_of_term tm
+
 -- compileTerm t e generates a list of statements that assigns the
 -- value of t to expression e.
 compileTerm :: Term TyData -> CExpr -> CM ([CCompoundBlockItem NodeInfo])
@@ -394,22 +415,21 @@ compileTerm (TmAbs _ _ _ _) _ = error "compileTerm: unexpected TmAbs"
 compileTerm (TmApp (TyData ty) t1 t2) res = do
   new_thunk <- freshVar
   (x1, x2) <- liftM2 (,) freshVar freshVar
+  let t1Ty = TyArrow TyUnit TyUnit
   s1 <- compileTerm t1 $ mkVar x1
   s2 <- compileTerm t2 $ mkVar x2
-  let (ct, ds) = typeToC ty
   return $
-    [CBlockDecl $ mkVarDecl (unTyData $ data_of_term t1) x1,
+    [CBlockDecl $ mkVarDecl t1Ty x1,
      CBlockDecl $ mkVarDecl (unTyData $ data_of_term t2) x2] ++
     s1 ++ s2 ++
     [CBlockDecl $ thunkDeclMalloc new_thunk] ++
     (CBlockStmt <$> (copyThunk (mkVar x1) $ mkVar new_thunk)) ++
     [CBlockStmt $ mkAssign
-      (CIndex (CMember (mkVar new_thunk) (mkIdent "args") True nil)
+     (CIndex (CMember (mkVar new_thunk) (mkIdent "args") True nil)
         (mkIntConst 0) nil) (CCast genericDecl (mkVar x2) nil),
      CBlockStmt $ mkAssign res
-      (CCast (mkTypeDecl ct ds)
-        (CCall (CMember (mkVar new_thunk) (mkIdent "fun_ptr") True nil)
-          [CMember (mkVar new_thunk) (mkIdent "args") True nil] nil) nil)]
+      (CCall (CMember (mkVar new_thunk) (mkIdent "fun_ptr") True nil)
+        [CMember (mkVar new_thunk) (mkIdent "args") True nil] nil)]
 
 compileTerm (TmUnit _) res = return [CBlockStmt $ mkAssign res $ mkIntConst 0]
 compileTerm (TmBool _ b) res = return [CBlockStmt $ mkAssign res $ mkBoolConst b]
@@ -422,7 +442,6 @@ compileTerm (TmIf _ t1 t2 t3) res = do
   s1 <- compileTerm t1 $ mkVar x1
   s2 <- compileTerm t2 $ mkVar x2
   s3 <- compileTerm t3 $ mkVar x3
-  let TyData ty2 = data_of_term t2
   return $
     (CBlockDecl $ mkVarDecl (unTyData $ data_of_term t1) x1) :
     s1 ++
@@ -511,7 +530,9 @@ compileTerm (TmMatch (TyData ty) tm cases) res = do
             (Just acc) nil)
     (CCompound [] [] nil) cases
   return $ (CBlockDecl $ mkVarDecl variant_ty discrim_x) :
-    discrim_s ++ [CBlockStmt if_stmt]
+    discrim_s ++
+    [CBlockStmt $ mkAssign res $ mkIntConst 0,
+     CBlockStmt if_stmt]
 
 compileTerm (TmRecord (TyData ty) fields) res = do
   xs <- mapM (const freshVar) fields
@@ -661,7 +682,7 @@ compileCommand = \case
                          locals ctx }) $ do
       res <- freshVar
       s <- compileTerm body $ mkVar res
-      let (ct, ds) = typeToC $ returnType ty
+      let bodyTy = unTyData $ data_of_term body
       -- debugPrint ("compiling supercombinator " ++ show nm) $
       --   debugPrint ("ty: " ++ show ty) $
       --   debugPrint ("ct: " ++ show ct) $
@@ -674,7 +695,7 @@ compileCommand = \case
                   [] nil]) Nothing [] nil, Nothing, Nothing)] nil,
             -- Definition.
             CFDefExt $ mkCFun nm
-            (CCompound [] ((CBlockDecl $ mkVarDecl (returnType ty) res) :
+            (CCompound [] ((CBlockDecl $ mkVarDecl bodyTy res) :
                            s ++ [CBlockStmt $ CReturn
                                  (Just $ CCast genericDecl (mkVar res) nil) nil]) nil)]
 

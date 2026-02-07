@@ -1,0 +1,17 @@
+# EXPECT: OK
+# EXPECT-JS-OUT: 1
+# EXPECT-C-OUT: 1
+
+class a ∈ Eq
+  | eq : a -> a -> Bool
+
+instance Int ∈ Eq
+  | eq = λx. λy. x = y
+
+pure eqInt : Int -> Int -> Bool
+def eqInt = eq
+
+pure applyPred : (Int -> Int -> Bool) -> Int
+def applyPred = λf. if f 3 3 then 1 else 0
+
+run applyPred eqInt

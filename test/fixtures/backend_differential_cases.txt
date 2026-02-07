@@ -1,4 +1,6 @@
-# Backend execution fixtures (run by JS and C suites).
+# Deterministic interpreter-vs-JS-vs-C differential corpus.
+# Keep this list to fixtures where interpreter semantics are expected
+# to align with backend behavior.
 test/fixtures/backend_if.hk
 test/fixtures/backend_let.hk
 test/fixtures/backend_data_match.hk

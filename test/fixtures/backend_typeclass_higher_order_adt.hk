@@ -1,0 +1,24 @@
+# EXPECT: OK
+# EXPECT-JS-OUT: 5
+# EXPECT-C-OUT: 5
+
+class a is Eq
+  | eq : a -> a -> Bool
+
+instance Int is Eq
+  | eq = λx. λy. x = y
+
+data Box =
+  | Box Int
+  | Empty
+
+pure applyToBox : (Int -> Bool) -> Box -> Bool
+def applyToBox = λpred. λb.
+  destruct b as
+  | Box x -> pred x
+  | Empty -> false
+
+pure eqThree : Int -> Bool
+def eqThree = eq 3
+
+run if applyToBox eqThree (Box 3) then 5 else 0

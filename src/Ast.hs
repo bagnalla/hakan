@@ -668,6 +668,8 @@ patternVars = \case
 
 patternVarTypes :: Pattern -> Type -> [(Id, Type)]
 patternVarTypes (PVar x) ty = [(x, ty)]
+patternVarTypes p (TyConstructor (TypeConstructor { tycon_instantiated = ty })) =
+  patternVarTypes p ty
 patternVarTypes (PPair p1 p2) (TyVariant _ _ [(_, [ty1, ty2])]) =
   nub $ patternVarTypes p1 ty1 ++ patternVarTypes p2 ty2
 patternVarTypes (PPair p1 p2) _ =
