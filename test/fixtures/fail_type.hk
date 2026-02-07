@@ -1,0 +1,3 @@
+# EXPECT: ERROR
+
+run if true then 0 else false

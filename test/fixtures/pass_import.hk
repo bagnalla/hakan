@@ -1,0 +1,5 @@
+# EXPECT: OK
+# EXPECT-VALUE: (VInt 7)
+
+∃ hk/base
+run id 7

@@ -1,0 +1,7 @@
+# EXPECT: OK
+# EXPECT-VALUE: (VInt 41)
+
+pure id : a -> a
+def id = \x. x
+
+run id 41

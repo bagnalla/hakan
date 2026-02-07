@@ -1,0 +1,5 @@
+# One case path per line (repository-relative).
+test/fixtures/pass_identity.hk
+test/fixtures/pass_import.hk
+test/fixtures/fail_parse.hk
+test/fixtures/fail_type.hk
