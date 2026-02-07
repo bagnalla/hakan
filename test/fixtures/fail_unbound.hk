@@ -1,0 +1,4 @@
+# EXPECT: ERROR
+# EXPECT-ERROR: unbound identifier
+
+run missingName

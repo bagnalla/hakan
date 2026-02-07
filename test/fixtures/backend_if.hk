@@ -1,0 +1,5 @@
+# EXPECT: OK
+# EXPECT-JS-OUT: 7
+# EXPECT-C-OUT: 7
+
+run if true then 7 else 9

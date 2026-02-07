@@ -1,0 +1,4 @@
+# EXPECT: ERROR
+# EXPECT-ERROR: unable to unify
+
+run 1 2

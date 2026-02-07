@@ -1,0 +1,5 @@
+# EXPECT: OK
+# EXPECT-VALUE: (VInt 0)
+
+assert 1 = 1
+run 0

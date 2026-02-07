@@ -48,6 +48,8 @@ test-suite hakan-test
   main-is:             Spec.hs
   build-depends:       base
                      , hakan
+                     , directory
+                     , process
                      -- , QuickCheck
                      -- , test-invariant
                      -- , generic-random

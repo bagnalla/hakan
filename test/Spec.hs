@@ -2,9 +2,11 @@ module Main where
 
 import Control.Monad (forM)
 import Data.Char (isSpace, toUpper)
-import Data.List (isPrefixOf)
+import Data.List (intercalate, isPrefixOf)
 import Data.Maybe (catMaybes)
-import System.Exit (exitFailure)
+import System.Directory (doesFileExist, findExecutable)
+import System.Exit (ExitCode(..), exitFailure)
+import System.Process (readProcessWithExitCode)
 
 import Core (genTypeVars)
 import Ast (Prog)
@@ -21,27 +23,161 @@ data ExpectedStatus =
 data Expectations = Expectations
   { expectedStatus :: ExpectedStatus
   , expectedValue :: Maybe String
+  , expectedJSOut :: Maybe String
+  , expectedCOut :: Maybe String
   } deriving Show
 
 defaultExpectations :: Expectations
 defaultExpectations = Expectations
   { expectedStatus = ExpectOk
   , expectedValue = Nothing
+  , expectedJSOut = Nothing
+  , expectedCOut = Nothing
   }
 
 casesFile :: FilePath
 casesFile = "test/fixtures/cases.txt"
 
+backendCasesFile :: FilePath
+backendCasesFile = "test/fixtures/backend_cases.txt"
+
 main :: IO ()
 main = do
   casePaths <- loadCasePaths casesFile
-  failures <- catMaybes <$> mapM runCase casePaths
+  fixtureFailures <- catMaybes <$> mapM runCase casePaths
+  backendFailures <- runBackendSuites
+  let failures = fixtureFailures ++ backendFailures
   if null failures then
-    putStrLn $ "All fixture tests passed (" ++ show (length casePaths) ++ ")."
+    putStrLn $
+      "All fixture tests passed (" ++ show (length casePaths) ++
+      " frontend + backend suites)."
   else do
     putStrLn $ "Fixture test failures: " ++ show (length failures)
     mapM_ putStrLn failures
     exitFailure
+
+runBackendSuites :: IO [String]
+runBackendSuites = do
+  exists <- doesFileExist backendCasesFile
+  if not exists then return [] else do
+    casePaths <- loadCasePaths backendCasesFile
+    jsFailures <- runBackendSuite "JS" ["stack", "node"] (runJSCase casePaths)
+    cFailures <- runBackendSuite "C" ["stack", "gcc"] (runCCase casePaths)
+    return $ jsFailures ++ cFailures
+
+runBackendSuite :: String -> [String] -> IO [Maybe String] -> IO [String]
+runBackendSuite name deps runCases = do
+  missing <- missingExecutables deps
+  if null missing then do
+    failures <- catMaybes <$> runCases
+    if null failures then
+      putStrLn $ name ++ " backend fixtures passed."
+    else
+      putStrLn $ name ++ " backend fixture failures: " ++ show (length failures)
+    return failures
+  else do
+    putStrLn $
+      "Skipping " ++ name ++ " backend fixtures (missing tools: " ++
+      intercalate ", " missing ++ ")."
+    return []
+
+missingExecutables :: [String] -> IO [String]
+missingExecutables = fmap catMaybes . mapM missingExecutable
+  where
+    missingExecutable exe = do
+      found <- findExecutable exe
+      return $ case found of
+        Just _ -> Nothing
+        Nothing -> Just exe
+
+runJSCase :: [FilePath] -> IO [Maybe String]
+runJSCase = mapM runOne
+  where
+    jsOutPath = "/tmp/hakan_backend_test.js"
+    runOne path = do
+      src <- readFile path
+      let ex = parseExpectations src
+      case expectedJSOut ex of
+        Nothing -> return $ Just $ path ++ ": missing EXPECT-JS-OUT directive."
+        Just expectedOut -> do
+          compiled <- runCmd "stack" ["exec", "hakan-exe", path, "js", jsOutPath]
+          case compiled of
+            Left e -> return $ Just $ path ++ ": JS compile failed:\n" ++ e
+            Right () -> do
+              ran <- runCmdOut "node" [jsOutPath]
+              case ran of
+                Left e -> return $ Just $ path ++ ": JS run failed:\n" ++ e
+                Right actual ->
+                  if trim actual == trim expectedOut then
+                    return Nothing
+                  else
+                    return $ Just $
+                      path ++ ": JS output mismatch. expected " ++ show expectedOut ++
+                      ", got " ++ show (trim actual)
+
+runCCase :: [FilePath] -> IO [Maybe String]
+runCCase = mapM runOne
+  where
+    cOutPath = "/tmp/hakan_backend_test.c"
+    cBinPath = "/tmp/hakan_backend_test.bin"
+    runOne path = do
+      src <- readFile path
+      let ex = parseExpectations src
+      case expectedCOut ex of
+        Nothing -> return $ Just $ path ++ ": missing EXPECT-C-OUT directive."
+        Just expectedOut -> do
+          compiled <- runCmd "stack" ["exec", "hakan-exe", path, "c", cOutPath]
+          case compiled of
+            Left e -> return $ Just $ path ++ ": C compile failed:\n" ++ e
+            Right () -> do
+              built <- runCmd
+                "gcc"
+                ["-g", "-I", "out", cOutPath, "-no-pie", "out/gc.a", "-o", cBinPath]
+              case built of
+                Left e -> return $ Just $ path ++ ": C build failed:\n" ++ e
+                Right () -> do
+                  ran <- runCmdOut cBinPath []
+                  case ran of
+                    Left e -> return $ Just $ path ++ ": C run failed:\n" ++ e
+                    Right actual ->
+                      if trim actual == trim expectedOut then
+                        return Nothing
+                      else
+                        return $ Just $
+                          path ++ ": C output mismatch. expected " ++ show expectedOut ++
+                          ", got " ++ show (trim actual)
+
+runCmd :: FilePath -> [String] -> IO (Either String ())
+runCmd prog args = do
+  res <- readProcessWithExitCode prog args ""
+  case res of
+    (ExitSuccess, _, _) -> return $ Right ()
+    (ExitFailure code, out, err) ->
+      return $ Left $
+        unlines
+          [ "exit code: " ++ show code
+          , "command: " ++ unwords (prog : args)
+          , "stdout:"
+          , out
+          , "stderr:"
+          , err
+          ]
+
+runCmdOut :: FilePath -> [String] -> IO (Either String String)
+runCmdOut prog args = do
+  res <- readProcessWithExitCode prog args ""
+  case res of
+    (ExitSuccess, out, _) -> return $ Right out
+    (ExitFailure code, out, err) ->
+      return $ Left $
+        unlines
+          [ "exit code: " ++ show code
+          , "command: " ++ unwords (prog : args)
+          , "stdout:"
+          , out
+          , "stderr:"
+          , err
+          ]
 
 runCase :: FilePath -> IO (Maybe String)
 runCase path = do
@@ -102,6 +238,10 @@ parseDirective ex line =
     Just body
       | "EXPECT-VALUE:" `isPrefixOfCI` body ->
           ex { expectedValue = Just $ trim $ dropPrefix "EXPECT-VALUE:" body }
+      | "EXPECT-JS-OUT:" `isPrefixOfCI` body ->
+          ex { expectedJSOut = Just $ trim $ dropPrefix "EXPECT-JS-OUT:" body }
+      | "EXPECT-C-OUT:" `isPrefixOfCI` body ->
+          ex { expectedCOut = Just $ trim $ dropPrefix "EXPECT-C-OUT:" body }
       | "EXPECT-ERROR:" `isPrefixOfCI` body ->
           ex
             { expectedStatus =

@@ -1,0 +1,4 @@
+# EXPECT: OK
+# EXPECT-VALUE: (VInt 42)
+
+run let x = 40 in x + 2

@@ -1,0 +1,11 @@
+# EXPECT: OK
+# EXPECT-JS-OUT: 5
+# EXPECT-C-OUT: 5
+
+data Option a =
+  | None
+  | Some a
+
+run destruct (Some 5) as
+  | None -> 0
+  | Some x -> x

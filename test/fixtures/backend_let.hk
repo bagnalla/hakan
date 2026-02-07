@@ -1,0 +1,5 @@
+# EXPECT: OK
+# EXPECT-JS-OUT: 42
+# EXPECT-C-OUT: 42
+
+run let x = 20 in x + 22

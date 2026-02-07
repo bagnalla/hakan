@@ -1,0 +1,6 @@
+# EXPECT: OK
+# EXPECT-JS-OUT: 3
+# EXPECT-C-OUT: 3
+
+import hk/base
+run id 3

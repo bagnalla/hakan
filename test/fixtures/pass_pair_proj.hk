@@ -1,0 +1,5 @@
+# EXPECT: OK
+# EXPECT-VALUE: (VInt 3)
+
+import hk/base
+run proj1 (3, 4)

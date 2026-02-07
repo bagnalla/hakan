@@ -860,6 +860,7 @@ commandTypeRec f (CDecl fi x ty) = CDecl fi x $ f ty
 commandTypeRec f (CLet fi x tm) = CLet fi x $ termTypeRec f tm
 commandTypeRec f (CEval fi tm) = CEval fi $ termTypeRec f tm
 commandTypeRec f (CCheck fi tm) = CCheck fi $ termTypeRec f tm
+commandTypeRec f (CAssert fi tm) = CAssert fi $ termTypeRec f tm
 commandTypeRec f (CData fi nm tyvars ctors) =
   CData fi nm tyvars $ map (mapSnd $ map f) ctors
 commandTypeRec f (CRecord fi nm tyvars fields) =
@@ -868,12 +869,15 @@ commandTypeRec f (CClass fi constrs nm tyvar methods) =
   CClass fi constrs nm tyvar $ map (mapSnd f) methods
 commandTypeRec f (CInstance fi constrs nm ty methods) =
   CInstance fi constrs nm (f ty) $ map (mapSnd $ termTypeRec f) methods
+commandTypeRec f (CSuperCombinator fi nm params body) =
+  CSuperCombinator fi nm (map (mapSnd f) params) (termTypeRec f body)
 
 commandTypeRecM :: Monad m => (Type -> m Type) -> Command α -> m (Command α)
 commandTypeRecM f (CDecl fi x ty) = CDecl fi x <$> f ty
 commandTypeRecM f (CLet fi x tm) = CLet fi x <$> termTypeRecM f tm
 commandTypeRecM f (CEval fi tm) = CEval fi <$> termTypeRecM f tm
 commandTypeRecM f (CCheck fi tm) = CCheck fi <$> termTypeRecM f tm
+commandTypeRecM f (CAssert fi tm) = CAssert fi <$> termTypeRecM f tm
 commandTypeRecM f (CData fi nm tyvars ctors) =
   CData fi nm tyvars <$> mapM (mapSndM $ mapM f) ctors
 commandTypeRecM f (CRecord fi nm tyvars fields) =
@@ -883,6 +887,8 @@ commandTypeRecM f (CClass fi constrs nm tyvar methods) =
 commandTypeRecM f (CInstance fi constrs nm ty methods) =
   pure (CInstance fi constrs nm) <*> f ty <*>
   mapM (mapSndM $ termTypeRecM f) methods
+commandTypeRecM f (CSuperCombinator fi nm params body) =
+  CSuperCombinator fi nm <$> mapM (mapSndM f) params <*> termTypeRecM f body
 
 
 -- We should be able to use a simple recursion scheme and not worry

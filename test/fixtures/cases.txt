@@ -1,5 +1,13 @@
 # One case path per line (repository-relative).
 test/fixtures/pass_identity.hk
 test/fixtures/pass_import.hk
+test/fixtures/pass_if.hk
+test/fixtures/pass_let.hk
+test/fixtures/pass_pair_proj.hk
+test/fixtures/pass_list_length.hk
+test/fixtures/pass_assert_then_run.hk
 test/fixtures/fail_parse.hk
 test/fixtures/fail_type.hk
+test/fixtures/fail_unbound.hk
+test/fixtures/fail_bad_if_guard.hk
+test/fixtures/fail_apply_non_function.hk

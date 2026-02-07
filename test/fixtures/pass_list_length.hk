@@ -1,0 +1,5 @@
+# EXPECT: OK
+# EXPECT-VALUE: (VInt 3)
+
+import hk/base
+run length (Cons 1 (Cons 2 (Cons 3 Nil)))
